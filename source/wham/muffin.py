@@ -15,6 +15,7 @@ them automatically.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import json
 import tarfile
 from pathlib import Path
@@ -41,6 +42,8 @@ SUBLEAD_SOURCES = {
     "eta": ("eta_2",),
     "phi": ("phi_2",),
     "ip_LengthSig": ("ip_LengthSig_2",),
+    "charge": ("charge_2",),
+    "met_dphi": ("met_dphi_2",),
     "n_jets": ("n_jets",),
     "n_bjets": ("n_bjets",),
     "dR": ("dR",),
@@ -60,9 +63,65 @@ EXTRAPOLATION = {
 BKGSUB_VARIATION = {"QCD": 0.20, "Wjets": 0.10}
 
 
-def source_columns() -> frozenset[str]:
-    """Every input column the scoring might read."""
-    return frozenset(c for sources in SUBLEAD_SOURCES.values() for c in sources)
+def _feature_recipe(feature: str):
+    """Source candidates and optional derivation for sublead scoring.
+
+    Unsuffixed tau features refer to leg 2, ``_other`` to leg 1;
+    explicit ``_1``/``_2`` names retain their physical leg numbering.
+    Other names are read directly (e.g. new global training variables).
+    """
+    base, suffix, leg = feature, "", "2"
+    for ending, number in (("_other", "1"), ("_1", "1"), ("_2", "2")):
+        if feature.endswith(ending):
+            base, suffix, leg = feature[:-len(ending)], ending, number
+            break
+    if feature in {"era_label", "is_lead_tau"}:
+        return (), "constant", ()
+    if base in {"jpt_pt", "met_var_qcd"}:
+        candidates = tuple(dict.fromkeys((f"{base}_{leg}", feature)))
+        dependencies = ((f"jpt{suffix}", f"pt{suffix}") if base == "jpt_pt"
+                        else ("met_pt", f"pt{suffix}", f"met_dphi{suffix}"))
+        return candidates, base, dependencies
+    if base == "jpt":
+        return (f"seeding_jpt_{leg}", f"jpt_{leg}"), None, ()
+    if base in SUBLEAD_SOURCES and SUBLEAD_SOURCES[base][0].endswith("_2"):
+        return (f"{base}_{leg}",), None, ()
+    if suffix == "_other":
+        return (f"{base}_1",), None, ()
+    return (feature,), None, ()
+
+
+def source_columns(ff: Any = None) -> frozenset[str]:
+    """Candidate raw inputs, including dependencies, for configured models.
+
+    Read only JSON metadata here: planning a skim need not load the trees.
+    Candidates absent from the source are allowed; build_features validates
+    that each requested feature can actually be provided.
+    """
+    features = set(SUBLEAD_SOURCES) | {"jpt_pt", "era_label", "is_lead_tau"}
+    if ff is not None:
+        features = set()
+        for process in ff.processes:
+            path = model_file(ff.models, ff.channel, process)
+            with path.open(encoding="utf-8") as stream:
+                names = json.load(stream).get("learner", {}).get("feature_names")
+            if not names:
+                raise RuntimeError(f"{path} carries no feature names")
+            features.update(names)
+        if ff.systematics:
+            features.add("pt")  # extrapolation uncertainty
+
+    columns = set()
+
+    def collect(feature):
+        sources, _, dependencies = _feature_recipe(feature)
+        columns.update(sources)
+        for dependency in dependencies:
+            collect(dependency)
+
+    for feature in features:
+        collect(feature)
+    return frozenset(columns)
 
 
 def model_file(models_dir: Path, channel: str, process: str) -> Path:
@@ -93,6 +152,7 @@ def signature(ff: Any) -> dict | None:
     if ff is None:
         return None
     sig: dict[str, Any] = {
+        "feature_builder_version": 2,
         "channel": ff.channel,
         "era_label": ff.resolved_era_label(),
         "processes": sorted(ff.processes),
@@ -366,37 +426,50 @@ class FFModel:
         return out
 
 
-def build_features(table, era_label: int):
-    """Engineered tau_h-leg feature frame for a pyarrow table."""
+def build_features(table, era_label: int, features: Iterable[str] | None = None):
+    """Build only requested features, in model order, from a pyarrow table."""
     import numpy as np
     import pandas as pd
 
+    requested = list(dict.fromkeys(features if features is not None else
+                                  [*SUBLEAD_SOURCES, "jpt_pt", "era_label", "is_lead_tau"]))
     cols = {}
-    missing = []
-    for feat, sources in SUBLEAD_SOURCES.items():
-        src = next((s for s in sources if s in table.column_names), None)
-        if src is None:
-            missing.append(f"{feat} (looked for {', '.join(sources)})")
-            continue
-        cols[feat] = table.column(src).to_numpy(zero_copy_only=False)
-    if missing:
-        raise RuntimeError(
-            "fake_factors: input is missing model feature columns: " + "; ".join(missing)
-        )
 
-    frame = pd.DataFrame(cols)
-    frame["jpt_pt"] = (frame["jpt"] / frame["pt"]).clip(lower=0)
-    # frame["met_var_qcd"] = (frame["met_pt"] / frame["pt"]) * np.cos(frame["met_dphi"])
-    frame["era_label"] = era_label
-    frame["is_lead_tau"] = 0
-    return frame
+    def resolve(feature):
+        if feature in cols:
+            return cols[feature]
+        sources, operation, dependencies = _feature_recipe(feature)
+        src = next((s for s in sources if s in table.column_names), None)
+        if operation == "constant":
+            values = np.full(table.num_rows, era_label if feature == "era_label" else 0)
+        elif src is not None:
+            values = table.column(src).to_numpy(zero_copy_only=False)
+        elif dependencies:
+            args = [resolve(name) for name in dependencies]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                if operation == "jpt_pt":
+                    values = np.maximum(args[0] / args[1], 0)
+                else:
+                    values = (args[0] / args[1]) * np.cos(args[2])
+        else:
+            raise RuntimeError(f"{feature} (looked for {', '.join(sources)})")
+        cols[feature] = values
+        return values
+
+    for feature in requested:
+        try:
+            resolve(feature)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"fake_factors: cannot build model feature {feature!r}: missing {exc}"
+            ) from exc
+    return pd.DataFrame({name: cols[name] for name in requested},
+                        index=pd.RangeIndex(table.num_rows))
 
 
 def augment_table(ff: Any, table):
     """Append the BDT FF score columns to a pyarrow table."""
     import pyarrow as pa
-
-    frame = build_features(table, ff.resolved_era_label())
 
     diagnostics_dir = Path("ff_diagnostics")
     diagnostics_dir = Path(diagnostics_dir) if diagnostics_dir else None
@@ -404,6 +477,13 @@ def augment_table(ff: Any, table):
 
     for process in ff.processes:
         model = FFModel(ff.models, ff.channel, process, want_bootstrap=ff.systematics)
+        features = list(model.features)
+        if ff.systematics and "pt" not in features:
+            features.append("pt")
+        try:
+            frame = build_features(table, ff.resolved_era_label(), features)
+        except RuntimeError as exc:
+            raise RuntimeError(f"fake_factors: {ff.channel}_{process}: {exc}") from exc
         scores = model.score(
             frame,
             ff.systematics,

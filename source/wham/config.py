@@ -609,7 +609,7 @@ class AnalysisConfig(_Model):
         if self.fake_factors is not None:
             from wham.muffin import source_columns
 
-            cols |= source_columns()
+            cols |= source_columns(self.fake_factors)
         return frozenset(cols)
 
 
