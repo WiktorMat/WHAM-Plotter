@@ -106,6 +106,30 @@ def _skim_progress(total: int):
     return _cb
 
 
+def _render_decay_mode_splits(
+    cfg, samples, skims, *, families, only_vars, workers, use_cache,
+    cache_only=False,
+) -> None:
+    """Fill/load and render every cumulative decay-mode category."""
+    from wham.decay_modes import category_config, decay_mode_categories
+    from wham.fill import fill_all
+    from wham.render import render_families
+
+    for category in decay_mode_categories(cfg):
+        split_cfg = category_config(cfg, category)
+        console.print(f"Decay-mode category: [bold]{category.name}[/bold]")
+        hists = fill_all(
+            split_cfg, samples, skims,
+            families=families, only_vars=only_vars,
+            workers=workers, use_cache=use_cache, cache_only=cache_only,
+            console=console,
+        )
+        render_families(
+            split_cfg, hists, skims, families=families,
+            only_vars=only_vars, outdir=split_cfg.resolved_output_dir(), console=console,
+        )
+
+
 @click.group()
 def main() -> None:
     """Fast H->tautau plotter: validated configs, skim + histogram caches."""
@@ -312,6 +336,10 @@ def plot(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...],
     outdir = cfg.resolved_output_dir()
     render_families(cfg, hists, skims, families=families,
                     only_vars=only_vars or None, outdir=outdir, console=console)
+    _render_decay_mode_splits(
+        cfg, samples, skims, families=families, only_vars=only_vars or None,
+        workers=workers, use_cache=not no_cache,
+    )
     console.print(
         f"[bold green]Done[/bold green] in {time.perf_counter() - t0:.1f}s -> {outdir}/"
     )
@@ -398,6 +426,10 @@ def render(config_path: str, only: tuple[str, ...], only_vars: tuple[str, ...]) 
     outdir = cfg.resolved_output_dir()
     render_families(cfg, hists, skims, families=families,
                     only_vars=only_vars or None, outdir=outdir, console=console)
+    _render_decay_mode_splits(
+        cfg, samples, skims, families=families, only_vars=only_vars or None,
+        workers=1, use_cache=True, cache_only=True,
+    )
     console.print(f"[bold green]Rendered[/bold green] -> {outdir}/")
 
 

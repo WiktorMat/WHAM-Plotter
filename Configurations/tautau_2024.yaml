@@ -1,0 +1,117 @@
+# wham analysis config — tau-tau channel, Run3 2024
+# Run with:  wham plot Configurations/tautau_2024.yaml
+# Per-sample xs/eff are auto-loaded from params.yaml next to this file.
+
+name: tautau_2024
+lumi: 109080.0            # /pb
+data_dir: /eos/home-w/wmatyszk/data_HiggsCP/PNet/Run3_2024/tt
+output_dir: plots/PNet_validation/tautau/a1-noRefitSV
+
+style:
+  cms_label: "Private Work"   # text after "CMS": Preliminary, Simulation, ...
+  era: "2024"                 # shown next to the lumi
+  com: 13.6                   # sqrt(s) in TeV
+
+selection: >
+  abs(eta_1) < 2.4 & abs(eta_2) < 2.5
+  & abs(ip_z_1) < 0.2 & abs(ip_z_2) < 0.2
+  & dR > 0.5
+  & idDeepTau2018v2p5VSe_1 >= 2 & idDeepTau2018v2p5VSe_2 >= 2
+  & idDeepTau2018v2p5VSmu_1 >= 4 & idDeepTau2018v2p5VSmu_2 >= 4
+  & (
+    (decayModePNet_1 == 0 & ip_LengthSig_1 >= 1.25)
+      | (decayMode_1 == 1 & decayModePNet_1 == 1 & pion_E_split_1 > 0.15)
+      | (decayMode_1 == 1 & decayModePNet_1 == 2 & pion_E_split_1 > 0.15)
+      | (decayModePNet_1 == 10 & hasRefitSV_1)
+      | (decayModePNet_1 == 11 & hasRefitSV_1)
+    )
+  & (
+    (decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25)
+      | (decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15)
+      | (decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15)
+      | (decayModePNet_2 == 10 & hasRefitSV_2)
+      | (decayModePNet_2 == 11 & hasRefitSV_2)
+    )
+#  & n_bjets == 0
+# NB: no VSjet cut here on purpose — qcd.iso/qcd.antiiso define the PP and
+# PF/FP/FF regions used by the two-leg fake-factor estimate below.
+
+trigger: "((trg_doubletau == 1) & (pt_1 > 40) & (pt_2 > 40)) | ((trg_doubletauandjet == 1) & (pt_1 > 35) & (pt_2 > 35) & (jpt_1 > 60))"
+weight: weight
+
+decay_mode_split:
+  level: 3                 # 1, 2 albo 3
+  channel: tt              # mt, et albo tt
+  column: decayModePNet    # lub decayMode
+
+# Order = stack draw order (bottom to top); data is drawn as points.
+processes:
+  QCD:      {kind: qcd, color: "tab:olive", label: "QCD multijet"}
+  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange", label: "$Z\\rightarrow\\tau\\tau$"}
+  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue", label: "$Z\\rightarrow\\mu\\mu$"}
+  DY_2E:    {samples: ["DYto2E_*"], color: "gold", label: "$Z\\rightarrow ee$"}
+  Wjets:   {samples: ["WtoENu_*", "WtoMuNu_*", "WtoTauNu_*"], color: "tab:red", label: "$W$+jets"}
+  ttbar:   {samples: ["TTto*"], color: "tab:purple", label: "$t\\bar{t}$"}
+  single_top: {samples: ["ST_tW_*"], color: "tab:cyan", label: "single top"}
+  diboson: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "diboson"}
+  Higgs:    {samples: ["GluGluHTo2Tau_UncorrelatedDecay_SM_Filtered_ProdAndDecay", "VBFHToTauTau_UncorrelatedDecay_Filtered", "WminusHToTauTau_UncorrelatedDecay_Filtered", "WplusHToTauTau_UncorrelatedDecay_Filtered", "ZHToTauTau_UncorrelatedDecay_Filtered"], color: "tab:pink", label: "H$\\rightarrow\\tau\\tau$"}
+  data:     {kind: data, samples: ["Tau_*"], color: "black"}
+
+qcd:
+  method: ff
+  os: "os == 1"
+  iso: "idPNetVSjet_1 >= 7 & idPNetVSjet_2 >= 7"
+  antiiso: >
+    ((idPNetVSjet_1 >= 7) & (idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7))
+    | ((idPNetVSjet_1 >= 1 & idPNetVSjet_1 < 7) & (idPNetVSjet_2 >= 7))
+    | ((idPNetVSjet_1 >= 1 & idPNetVSjet_1 < 7) & (idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7))
+  # PF*FF_2 + FP*FF_1 - FF*FF_1*FF_2. The negative double-fail term removes
+  # the overlap between the two single-fail extrapolations.
+  ff_weight: >
+    ((idPNetVSjet_1 >= 7) & (idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7))
+      * BDT_FF_score_QCD_sublead
+    + ((idPNetVSjet_1 >= 1 & idPNetVSjet_1 < 7) & (idPNetVSjet_2 >= 7))
+      * BDT_FF_score_QCD_lead
+    - ((idPNetVSjet_1 >= 1 & idPNetVSjet_1 < 7) & (idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7))
+      * BDT_FF_score_QCD_lead * BDT_FF_score_QCD_sublead
+
+fake_factors:
+  models: /eos/home-w/wmatyszk/data_HiggsCP/PNet/REAL/outputs/best_models/Run3_2024Thesis_withGlobal
+  channel: tt
+  processes: [QCD]
+  score_legs: both
+  era_label: 0
+
+variables:
+  pt_1:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\mu}$ [GeV]"}
+  pt_2:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\tau_{h}}$ [GeV]"}
+  m_vis:   {bins: 40, range: [0, 200],  label: "$m_{vis}$ [GeV]"}
+  # same column, different binnings: 'column' points at the source branch
+  m_vis_coarse: {column: m_vis, bins: 10, range: [0, 200], label: "$m_{vis}$ [GeV]"}
+  # explicit (variable-width) bin edges: give 'bins' a list, omit 'range'
+  m_vis_varbins: {column: m_vis, bins: [0, 40, 55, 65, 75, 85, 95, 110, 130, 160, 200],
+                  label: "$m_{vis}$ [GeV]"}
+  mt_tot:  {bins: 40, range: [0, 200],  label: "$m_{T}^{tot}$ [GeV]"}
+  mt_1:    {bins: 40, range: [0, 200],  label: "$m_{T}(\\mu)$ [GeV]"}
+  mt_2:    {bins: 40, range: [0, 200],  label: "$m_{T}(\\tau_{h})$ [GeV]"}
+  met_pt:  {bins: 40, range: [0, 200],  label: "$p_{T}^{miss}$ [GeV]"}
+  met_phi: {bins: 63, range: [-3.14159, 3.14159], label: "$\\phi^{miss}$", kind: angle}
+  dR:      {bins: 50, range: [0, 5],    label: "$\\Delta R(\\mu, \\tau_{h})$"}
+  n_bjets: {bins: 6, range: [-0.5, 5.5], label: "$N_{b-jets}$"}
+  # the muffin-baked BDT fake-factor score (data spans ~0-0.42, median ~0.09)
+  # bdt_ff_qcd: {column: BDT_FF_score_QCD_sublead, bins: 45, range: [0, 0.45],
+  #              label: "BDT FF score (QCD)"}
+  iso_1:   {bins: 50, range: [0, 0.5],    label: "$iso_{\\mu}$"}
+  aco_mu_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
+  # 2D discriminant unrolled to 1D: phiCP in bins of m_vis (y-major blocks)
+  aco_unrolled: {unroll: [aco_mu_rho, m_vis_varbins],
+                 label: "$\\phi_{CP}(\\mu\\rho)$ unrolled in $m_{vis}$"}
+
+plots:
+  datamc_metrics: []
+  datamc:     [pt_1, pt_2, m_vis, mt_tot, mt_1, mt_2, met_pt, met_phi, dR, iso_1]
+
+
+  #per DM split plotting. i dont know how do so but needs to be applied to the plots section of the config file,
+  #or somewhere where it can be easy to implement. 
+  #add option for blinding. like Blind: true, and then in the plotting code, if blind is true, then for data, plot nothing and overwrite the label to "Internal, Simulation".

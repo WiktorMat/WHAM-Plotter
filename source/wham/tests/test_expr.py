@@ -8,6 +8,41 @@ import pytest
 from wham.expr import Expr, ExprError, parse
 
 
+@pytest.mark.parametrize("dtype", [pa.bool_(), pa.int8(), pa.int32()])
+@pytest.mark.parametrize("source", [
+    "flag == 1", "flag == 0", "1 == flag", "flag != 1",
+    "flag == 2", "flag < 0.5", "flag >= -1", "flag == True",
+    "flag == False", "True == flag", "flag == other",
+    "(flag == 1 | other == 0) & pt > 26",
+])
+def test_boolean_numeric_comparisons(dtype, source):
+    from wham.expr import widened_arrow
+
+    table = pa.table({
+        "flag": pa.array([0, 1, 0, 1], type=pa.int8()).cast(dtype),
+        "other": [True, True, False, False],
+        "pt": [20.0, 25.0, 30.0, 40.0],
+        "row": [0, 1, 2, 3],
+    })
+    cols = {name: table[name].to_numpy() for name in table.column_names}
+    parsed = parse(source)
+    expected = cols["row"][parsed.evaluate(cols)].tolist()
+    actual = ds.dataset(table).to_table(filter=parsed.arrow(table.schema))
+    assert actual["row"].to_pylist() == expected
+
+    filt = widened_arrow(parsed, {"pt": (0.9, 1.1)}, table.schema)
+    rows = set(ds.dataset(table).to_table(filter=filt)["row"].to_pylist())
+    for scale in [0.9, 1.0, 1.1]:
+        shifted = dict(cols, pt=cols["pt"] * scale)
+        assert set(cols["row"][parsed.evaluate(shifted)]) <= rows
+
+
+def test_bare_boolean_filter_with_schema():
+    table = pa.table({"flag": [True, False, True], "other": [False, False, True]})
+    parsed = parse("flag & ~other")
+    assert ds.dataset(table).to_table(filter=parsed.arrow(table.schema)).num_rows == 1
+
+
 @pytest.fixture
 def table() -> pa.Table:
     rng = np.random.default_rng(7)

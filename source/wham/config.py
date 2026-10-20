@@ -297,6 +297,7 @@ class FakeFactorsCfg(_Model):
     models: Path                      # the BDTFFModel directory
     channel: str = "mt"
     processes: list[str] = ["QCD"]
+    score_legs: Literal["sublead", "both"] = "sublead"
     era: str | None = None            # a trained era, e.g. Run3_2022EE
     era_label: int | None = None      # raw label override (2024 borrowing 2023BPix etc.)
     systematics: bool = False         # also write the _up/_down score columns
@@ -344,6 +345,15 @@ class StyleCfg(_Model):
     com: float = 13.6                # sqrt(s) in TeV
 
 
+class DecayModeSplitCfg(_Model):
+    """Optional cumulative decay-mode splitting of every configured plot."""
+
+    level: Literal[1, 2, 3] = 1
+    channel: Literal["mt", "et", "tt"]
+    # Unsuffixed branch stem; the physical leg suffix is added internally.
+    column: Literal["decayModePNet", "decayMode"] = "decayModePNet"
+
+
 class PlotsCfg(_Model):
     resolution: list[tuple[str, str]] = []  # [reco, reference] pairs
     datamc: list[str] = []
@@ -374,6 +384,7 @@ class AnalysisConfig(_Model):
     variables: dict[str, VariableCfg]
     plots: PlotsCfg = PlotsCfg()
     style: StyleCfg = StyleCfg()
+    decay_mode_split: DecayModeSplitCfg | None = None
     fake_factors: FakeFactorsCfg | None = None
     # weight-based shape variations; set programmatically by `wham fit`
     variations: list[VariationCfg] = []
@@ -606,6 +617,13 @@ class AnalysisConfig(_Model):
             cols |= set(v.factors)
         if self.plots.display3d is not None:
             cols |= DISPLAY3D_COLUMNS
+        if self.decay_mode_split is not None and self.decay_mode_split.level >= 2:
+            leg_suffixes = (
+                ("2",)
+                if self.decay_mode_split.channel in ("mt", "et")
+                else ("1", "2")
+            )
+            cols |= {f"{self.decay_mode_split.column}_{leg}" for leg in leg_suffixes}
         if self.fake_factors is not None:
             from wham.muffin import source_columns
 

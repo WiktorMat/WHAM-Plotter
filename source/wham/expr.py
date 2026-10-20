@@ -142,13 +142,29 @@ def _validate(source: str, node: ast.AST, columns: set[str]) -> None:
         raise _err(source, node, f"unsupported syntax ({type(node).__name__})")
 
 
-def _to_arrow(node: ast.AST):
+def _comparison_operand(node: ast.AST, schema):
+    """Use numeric 0/1 for boolean comparison operands, as NumPy does."""
+    import pyarrow as pa
+
+    value = _to_arrow(node, schema)
+    if schema is None:
+        return value
+    is_bool = isinstance(node, ast.Constant) and isinstance(node.value, bool)
+    if isinstance(node, ast.Name):
+        index = schema.get_field_index(node.id)
+        is_bool = index >= 0 and pa.types.is_boolean(schema.field(index).type)
+    if is_bool:
+        return value.cast(pa.int8())
+    return value
+
+
+def _to_arrow(node: ast.AST, schema=None):
     import pyarrow.compute as pc
     import pyarrow.dataset as ds
 
     if isinstance(node, ast.Compare):
-        left = _to_arrow(node.left)
-        right = _to_arrow(node.comparators[0])
+        left = _comparison_operand(node.left, schema)
+        right = _comparison_operand(node.comparators[0], schema)
         op = node.ops[0]
         if isinstance(op, ast.Lt):
             return left < right
@@ -162,8 +178,8 @@ def _to_arrow(node: ast.AST):
             return left == right
         return left != right
     if isinstance(node, ast.BinOp):
-        left = _to_arrow(node.left)
-        right = _to_arrow(node.right)
+        left = _to_arrow(node.left, schema)
+        right = _to_arrow(node.right, schema)
         op = node.op
         if isinstance(op, ast.BitAnd):
             return left & right
@@ -177,12 +193,12 @@ def _to_arrow(node: ast.AST):
             return left * right
         return left / right
     if isinstance(node, ast.UnaryOp):
-        operand = _to_arrow(node.operand)
+        operand = _to_arrow(node.operand, schema)
         if isinstance(node.op, ast.Invert):
             return ~operand
         return ds.scalar(0) - operand  # USub; Expression has no __neg__
     if isinstance(node, ast.Call):  # validated: abs(x)
-        return pc.abs(_to_arrow(node.args[0]))
+        return pc.abs(_to_arrow(node.args[0], schema))
     if isinstance(node, ast.Name):
         return ds.field(node.id)
     if isinstance(node, ast.Constant):
@@ -196,9 +212,9 @@ class Expr:
     tree: ast.Expression
     columns: frozenset[str]
 
-    def arrow(self):
-        """The expression as a pyarrow dataset filter Expression."""
-        return _to_arrow(self.tree.body)
+    def arrow(self, schema=None):
+        """Dataset filter; pass the input schema for boolean/numeric comparisons."""
+        return _to_arrow(self.tree.body, schema)
 
     def evaluate(self, cols: Mapping[str, np.ndarray]) -> np.ndarray:
         """Evaluate against numpy columns; bool mask for cuts, floats for weights."""
@@ -310,7 +326,7 @@ def column_bounds(expr: Expr, column: str) -> tuple[float | None, float | None]:
     return lo, hi
 
 
-def widened_arrow(expr: Expr, bounds: Mapping[str, tuple[float, float]]):
+def widened_arrow(expr: Expr, bounds: Mapping[str, tuple[float, float]], schema=None):
     """A read-filter superset of the expression under column scaling.
 
     `bounds` maps column -> (smin, smax), the extreme constant factors the
@@ -330,9 +346,9 @@ def widened_arrow(expr: Expr, bounds: Mapping[str, tuple[float, float]]):
             kept.append(widened)
     if not kept:
         return None
-    out = _to_arrow(kept[0])
+    out = _to_arrow(kept[0], schema)
     for atom in kept[1:]:
-        out = out & _to_arrow(atom)
+        out = out & _to_arrow(atom, schema)
     return out
 
 

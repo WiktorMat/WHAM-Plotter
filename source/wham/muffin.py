@@ -3,8 +3,8 @@
 Adapted from higgs-dna-waw scripts/ditau/post_processing/add_bdtfakefactorscores.py.
 
 When the analysis YAML carries a `fake_factors:` block, the skim build applies
-the XGBoost BDT FF models to the hadronic tau leg and appends
-BDT_FF_score_<process>_sublead columns (plus _<Unc>_up/down with
+the XGBoost BDT FF models to the configured hadronic tau leg(s) and appends
+BDT_FF_score_<process>_sublead/lead columns (plus _<Unc>_up/down with
 systematics: true). The original EOS inputs are never touched; the scores live
 only in the local skim cache and behave like any other column afterwards:
 plot them as variables or point qcd.ff_weight at one.
@@ -63,15 +63,17 @@ EXTRAPOLATION = {
 BKGSUB_VARIATION = {"QCD": 0.20, "Wjets": 0.10}
 
 
-def _feature_recipe(feature: str):
-    """Source candidates and optional derivation for sublead scoring.
+def _feature_recipe(feature: str, scored_leg: int = 2):
+    """Source candidates and optional derivation for one scored tau leg.
 
-    Unsuffixed tau features refer to leg 2, ``_other`` to leg 1;
+    Unsuffixed tau features refer to ``scored_leg``, ``_other`` to the other leg;
     explicit ``_1``/``_2`` names retain their physical leg numbering.
     Other names are read directly (e.g. new global training variables).
     """
-    base, suffix, leg = feature, "", "2"
-    for ending, number in (("_other", "1"), ("_1", "1"), ("_2", "2")):
+    primary = str(scored_leg)
+    other = "1" if scored_leg == 2 else "2"
+    base, suffix, leg = feature, "", primary
+    for ending, number in (("_other", other), ("_1", "1"), ("_2", "2")):
         if feature.endswith(ending):
             base, suffix, leg = feature[:-len(ending)], ending, number
             break
@@ -87,7 +89,7 @@ def _feature_recipe(feature: str):
     if base in SUBLEAD_SOURCES and SUBLEAD_SOURCES[base][0].endswith("_2"):
         return (f"{base}_{leg}",), None, ()
     if suffix == "_other":
-        return (f"{base}_1",), None, ()
+        return (f"{base}_{other}",), None, ()
     return (feature,), None, ()
 
 
@@ -113,14 +115,17 @@ def source_columns(ff: Any = None) -> frozenset[str]:
 
     columns = set()
 
-    def collect(feature):
-        sources, _, dependencies = _feature_recipe(feature)
+    scored_legs = (1, 2) if ff is not None and ff.score_legs == "both" else (2,)
+
+    def collect(feature, scored_leg):
+        sources, _, dependencies = _feature_recipe(feature, scored_leg)
         columns.update(sources)
         for dependency in dependencies:
-            collect(dependency)
+            collect(dependency, scored_leg)
 
     for feature in features:
-        collect(feature)
+        for scored_leg in scored_legs:
+            collect(feature, scored_leg)
     return frozenset(columns)
 
 
@@ -143,8 +148,10 @@ def model_file(models_dir: Path, channel: str, process: str) -> Path:
     )
 
 
-def score_column(process: str) -> str:
-    return f"BDT_FF_score_{process}_sublead"
+def score_column(process: str, leg: str = "sublead") -> str:
+    if leg not in {"lead", "sublead"}:
+        raise ValueError(f"unknown tau leg {leg!r}")
+    return f"BDT_FF_score_{process}_{leg}"
 
 
 def signature(ff: Any) -> dict | None:
@@ -152,8 +159,9 @@ def signature(ff: Any) -> dict | None:
     if ff is None:
         return None
     sig: dict[str, Any] = {
-        "feature_builder_version": 2,
+        "feature_builder_version": 3,
         "channel": ff.channel,
+        "score_legs": ff.score_legs,
         "era_label": ff.resolved_era_label(),
         "processes": sorted(ff.processes),
         "systematics": ff.systematics,
@@ -366,7 +374,7 @@ class FFModel:
         return (1.0 - pred) / pred
 
     def score(self, frame, systematics: bool, diagnostics_dir: Path | None = None,
-          outlier_threshold: float = 5.0) -> dict:
+          outlier_threshold: float = 5.0, leg: str = "sublead") -> dict:
         """{column name: np.ndarray} for one engineered feature frame."""
         import numpy as np
         import xgboost as xgb
@@ -381,7 +389,7 @@ class FFModel:
             score = np.full(len(pred), np.nan, dtype=float)
             np.divide(1.0 - pred, pred, out=score, where=pred > 0.0)
 
-        tag = score_column(self.process)
+        tag = score_column(self.process, leg)
         out = {tag: score}
 
         if diagnostics_dir is not None and diagnostics is not None:
@@ -426,7 +434,8 @@ class FFModel:
         return out
 
 
-def build_features(table, era_label: int, features: Iterable[str] | None = None):
+def build_features(table, era_label: int, features: Iterable[str] | None = None,
+                   scored_leg: int = 2):
     """Build only requested features, in model order, from a pyarrow table."""
     import numpy as np
     import pandas as pd
@@ -438,10 +447,13 @@ def build_features(table, era_label: int, features: Iterable[str] | None = None)
     def resolve(feature):
         if feature in cols:
             return cols[feature]
-        sources, operation, dependencies = _feature_recipe(feature)
+        sources, operation, dependencies = _feature_recipe(feature, scored_leg)
         src = next((s for s in sources if s in table.column_names), None)
         if operation == "constant":
-            values = np.full(table.num_rows, era_label if feature == "era_label" else 0)
+            values = np.full(
+                table.num_rows,
+                era_label if feature == "era_label" else int(scored_leg == 1),
+            )
         elif src is not None:
             values = table.column(src).to_numpy(zero_copy_only=False)
         elif dependencies:
@@ -480,18 +492,30 @@ def augment_table(ff: Any, table):
         features = list(model.features)
         if ff.systematics and "pt" not in features:
             features.append("pt")
-        try:
-            frame = build_features(table, ff.resolved_era_label(), features)
-        except RuntimeError as exc:
-            raise RuntimeError(f"fake_factors: {ff.channel}_{process}: {exc}") from exc
-        scores = model.score(
-            frame,
-            ff.systematics,
-            diagnostics_dir=diagnostics_dir,
-            outlier_threshold=outlier_threshold,
-        )
-        for name, values in scores.items():
-            table = table.append_column(name, pa.array(values, type=pa.float64()))
+        legs = ((1, "lead"), (2, "sublead")) if ff.score_legs == "both" else ((2, "sublead"),)
+        for scored_leg, leg_name in legs:
+            try:
+                frame = build_features(
+                    table, ff.resolved_era_label(), features, scored_leg=scored_leg
+                )
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"fake_factors: {ff.channel}_{process}_{leg_name}: {exc}"
+                ) from exc
+            scores = model.score(
+                frame,
+                ff.systematics,
+                diagnostics_dir=diagnostics_dir,
+                outlier_threshold=outlier_threshold,
+                leg=leg_name,
+            )
+            for name, values in scores.items():
+                column = pa.array(values, type=pa.float64())
+                index = table.schema.get_field_index(name)
+                if index >= 0:
+                    table = table.set_column(index, name, column)
+                else:
+                    table = table.append_column(name, column)
 
     return table
 

@@ -382,6 +382,9 @@ class _ShiftedColumns(_Columns):
 
 def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey, Any]:
     """Fill every requested histogram for one sample. Runs in a worker."""
+    import pyarrow.parquet as pq
+
+    schema = pq.read_schema(skim.path)
     selection = parse(spec.selection)
     needed = set(skim.columns)  # read everything the skim has; it is already minimal
 
@@ -407,15 +410,15 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
             scale_bounds[col] = (min(lo, factor), max(hi, factor))
 
     if scale_bounds:
-        filter_expr = widened_arrow(selection, scale_bounds)
+        filter_expr = widened_arrow(selection, scale_bounds, schema)
         if parsed_cut is not None:
-            cut_expr = widened_arrow(parsed_cut, scale_bounds)
+            cut_expr = widened_arrow(parsed_cut, scale_bounds, schema)
             if cut_expr is not None:
                 filter_expr = cut_expr if filter_expr is None else filter_expr & cut_expr
     else:
-        filter_expr = selection.arrow()
+        filter_expr = selection.arrow(schema)
         if parsed_cut is not None:
-            filter_expr = filter_expr & parsed_cut.arrow()
+            filter_expr = filter_expr & parsed_cut.arrow(schema)
 
     table = read_skim(skim, columns=sorted(needed), filter_expr=filter_expr)
     cols = _Columns(table)
