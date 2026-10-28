@@ -7,3 +7,4 @@ __pycache__/
 # Outputs and caches (derived data, rebuilt on demand)
 plots/
 .cache/
+venvs/

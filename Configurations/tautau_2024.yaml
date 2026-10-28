@@ -5,7 +5,7 @@
 name: tautau_2024
 lumi: 109080.0            # /pb
 data_dir: /eos/home-w/wmatyszk/data_HiggsCP/PNet/Run3_2024/tt
-output_dir: plots/PNet_validation/tautau/a1-noRefitSV
+output_dir: plots/PNet_validation/tautau/baseline
 
 style:
   cms_label: "Private Work"   # text after "CMS": Preliminary, Simulation, ...
@@ -36,11 +36,26 @@ selection: >
 # NB: no VSjet cut here on purpose — qcd.iso/qcd.antiiso define the PP and
 # PF/FP/FF regions used by the two-leg fake-factor estimate below.
 
+# & (
+#     (decayModePNet_1 == 0 & ip_LengthSig_1 >= 1.25)
+#       | (decayMode_1 == 1 & decayModePNet_1 == 1 & pion_E_split_1 > 0.15)
+#       | (decayMode_1 == 1 & decayModePNet_1 == 2 & pion_E_split_1 > 0.15)
+#       | (decayModePNet_1 == 10 & hasRefitSV_1)
+#       | (decayModePNet_1 == 11 & hasRefitSV_1)
+#     )
+#   & (
+#     (decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25)
+#       | (decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15)
+#       | (decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15)
+#       | (decayModePNet_2 == 10 & hasRefitSV_2)
+#       | (decayModePNet_2 == 11 & hasRefitSV_2)
+#     )
+
 trigger: "((trg_doubletau == 1) & (pt_1 > 40) & (pt_2 > 40)) | ((trg_doubletauandjet == 1) & (pt_1 > 35) & (pt_2 > 35) & (jpt_1 > 60))"
 weight: weight
 
 decay_mode_split:
-  level: 3                 # 1, 2 albo 3
+  level: 1                 # 1, 2 albo 3
   channel: tt              # mt, et albo tt
   column: decayModePNet    # lub decayMode
 
@@ -50,7 +65,7 @@ processes:
   DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange", label: "$Z\\rightarrow\\tau\\tau$"}
   DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue", label: "$Z\\rightarrow\\mu\\mu$"}
   DY_2E:    {samples: ["DYto2E_*"], color: "gold", label: "$Z\\rightarrow ee$"}
-  Wjets:   {samples: ["WtoENu_*", "WtoMuNu_*", "WtoTauNu_*"], color: "tab:red", label: "$W$+jets"}
+  Wjets: {samples: ["WtoENu_*", "WtoMuNu_*", "WtoTauNu_*"], color: "tab:red", label: "$W$+jets", cut: "(genPartFlav_1 != 0 & genPartFlav_1 != 6) & (genPartFlav_2 != 0 & genPartFlav_2 != 6)"}  
   ttbar:   {samples: ["TTto*"], color: "tab:purple", label: "$t\\bar{t}$"}
   single_top: {samples: ["ST_tW_*"], color: "tab:cyan", label: "single top"}
   diboson: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "diboson"}

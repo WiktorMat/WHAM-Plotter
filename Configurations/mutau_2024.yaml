@@ -4,8 +4,8 @@
 
 name: mutau_2024
 lumi: 109080.0            # /pb
-data_dir: /eos/home-w/wmatyszk/data_mutau/Run3_2024/mt
-output_dir: plots/PNet_ff_VR
+data_dir: /eos/home-w/wmatyszk/data_HiggsCP/Run3_2024/mt
+output_dir: plots/noSF_noFFs
 
 style:
   cms_label: "Private Work"   # text after "CMS": Preliminary, Simulation, ...
@@ -15,10 +15,11 @@ style:
 selection: >
   pt_1 > 26 & pt_2 > 30
   & abs(eta_1) < 2.4 & abs(eta_2) < 2.5
-  & ip_z_1 < 0.2 & ip_z_2 < 0.2
-  & iso_1 < 0.3
-  & iso_1 > 0.15
+  & abs(ip_z_1) < 0.2 & abs(ip_z_2) < 0.2
+  & iso_1 < 0.15
+  & mt_1 < 65
   & dR > 0.5
+  & ip_LengthSig_1 >= 1.0
   & idDeepTau2018v2p5VSe_2 >= 2
   & idDeepTau2018v2p5VSmu_2 >= 4
   & (
@@ -26,6 +27,7 @@ selection: >
       | (decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15)
       | (decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15)
       | (decayModePNet_2 == 10 & hasRefitSV_2)
+      | (decayModePNet_2 == 11 & hasRefitSV_2)
     )
 #  & n_bjets == 0
 # NB: no idDeepTau...VSjet_2 cut here on purpose — the signal region gets it
@@ -37,7 +39,7 @@ weight: weight
 
 # Order = stack draw order (bottom to top); data is drawn as points.
 processes:
-  # jet_fakes: {kind: ff, color: "tab:olive", label: "jet$\\rightarrow\\tau_{h}$"}
+  jet_fakes: {kind: ff, color: "tab:olive", label: "jet$\\rightarrow\\tau_{h}$"}
   QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}  
   dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
   tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
@@ -47,9 +49,9 @@ processes:
   # tt_jfake: {samples: ["TTto*", "ST_tW_*"], color: "plum",
   #            label: "$t\\bar{t}$ (jet$\\rightarrow\\tau_{h}$)",
   #            cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6", ff_component: ttbar}
-  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red", label: "W+jets", 
+  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "lightcoral", label: "W+jets", 
              cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
-  W_jfake:    {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "lightcoral",
+  W_jfake:    {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red",
                label: "W (jet$\\rightarrow\\tau_{h}$)",
                cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6",
                ff_component: Wjets}
@@ -60,39 +62,11 @@ processes:
   data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
 
 qcd:
-  method: ff              # per-bin transfer factor from the anti-iso sidebands
+  method: abcd              # per-bin transfer factor from the anti-iso sidebands
   os: "os == 1"
-  iso: "idDeepTau2018v2p5VSjet_2 >= 7"
-  antiiso: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 7"
+  iso: "idPNetVSjet_2 >= 7"
+  antiiso: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
   ff_weight: "BDT_FF_score_QCD_sublead"
-
-# Bake BDT fake-factor scores into the skims (see README "BDT fake factors").
-fake_factors:
-  models: /eos/home-w/wmatyszk/data_mutau/REAL/outputs/best_models/Run3_2024Thesis_withGlobal
-  channel: mt
-  processes: [QCD]
-  era_label: 0              # the muffin_trainings model was trained with label 0
-  closure:
-    enabled: true
-    process: QCD
-    selection: "os == 0"
-    pass: "idDeepTau2018v2p5VSjet_2 >= 7"
-    fail: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 7"
-    variables: [pt_2, m_vis, dR, bdt_ff_qcd]
-    metrics: [normalization, shape_chi2, max_significance]
-  # Mixed MUFFIN jet-fake estimate example. To use it, add a kind=ff output
-  # process (see the commented process block below), tag MC fake processes with
-  # ff_component, and switch enabled to true. Required models are derived from
-  # the flags: QCD -> QCD, Wjets -> Wjets, ttbar -> ttbarMC.
-  # estimate:
-  #   enabled: true
-  #   output_process: jet_fakes
-  #   components: {QCD: true, Wjets: true, ttbar: false}
-  #   application_region:
-  #     selection: "os == 1"
-  #     pass: "idDeepTau2018v2p5VSjet_2 >= 7"
-  #     fail: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 7"
-  #   fake_cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"
 
 variables:
   pt_1:    {bins: 24, range: [20, 80],  label: "$p_{T}^{\\mu}$ [GeV]"}
@@ -113,22 +87,17 @@ variables:
   # the muffin-baked BDT fake-factor score (data spans ~0-0.42, median ~0.09)
   bdt_ff_qcd: {column: BDT_FF_score_QCD_sublead, bins: 45, range: [0, 0.45],
                label: "BDT FF score (QCD)"}
+  iso_1:   {bins: 50, range: [0, 0.5],    label: "$iso_{\\mu}$"}
   aco_mu_rho: {bins: 8, range: [0, 6.283185307179586], label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
   # 2D discriminant unrolled to 1D: phiCP in bins of m_vis (y-major blocks)
   aco_unrolled: {unroll: [aco_mu_rho, m_vis_varbins],
                  label: "$\\phi_{CP}(\\mu\\rho)$ unrolled in $m_{vis}$"}
 
 plots:
-  datamc_metrics: [normalization, shape_chi2, max_significance]
-  resolution:
-    - [pt_1, pt_2]
-    - [mt_tot, m_vis]
-  datamc:     [pt_1, pt_2, m_vis, m_vis_coarse, m_vis_varbins,
-               mt_tot, mt_1, mt_2, met_pt, met_phi, dR, bdt_ff_qcd,
-               aco_unrolled]
+  datamc_metrics: []
+  datamc:     [pt_1, pt_2, m_vis, mt_tot, mt_1, mt_2, met_pt, met_phi, dR, bdt_ff_qcd, iso_1]
   cp:
     - {var: aco_mu_rho, even: wt_cp_sm, odd: wt_cp_ps}
-  display3d:  {sample: "TTto2L2Nu", n_events: 3}
 
 
   #per DM split plotting. i dont know how do so but needs to be applied to the plots section of the config file,

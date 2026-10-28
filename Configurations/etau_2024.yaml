@@ -5,7 +5,7 @@
 name: etau_2024
 lumi: 109080.0            # /pb
 data_dir: /eos/user/t/tsarkar/Run3_2024_et/Run3_2024/et
-output_dir: plots/etau_PNet_ff_pt2_30
+output_dir: plots/etau_abcd
 
 style:
   cms_label: "Private Work"   # text after "CMS": Preliminary, Simulation, ...
@@ -31,6 +31,7 @@ selection: >
       | (decayModePNet_2 == 10 & hasRefitSV_2)
       | (decayModePNet_2 == 11 & hasRefitSV_2)
     )
+  & ip_LengthSig_1 >= 1.0
 # NB: no idPNetVSjet_2 cut here on purpose — the signal region gets it
 # from qcd.iso below; putting it in the baseline empties the ABCD sidebands.
 
@@ -39,7 +40,7 @@ weight: weight
 
 # Order = stack draw order (bottom to top); data is drawn as points.
 processes:
-  # jet_fakes: {kind: ff, color: "tab:olive", label: "jet$\\rightarrow\\tau_{h}$"}
+  jet_fakes: {kind: ff, color: "tab:olive", label: "jet$\\rightarrow\\tau_{h}$"}
   QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}
   dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
   tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
@@ -62,7 +63,7 @@ processes:
   data:     {kind: data, samples: ["EGamma0_*", "EGamma1_*"], color: "black"}
 
 qcd:
-  method: ff
+  method: abcd
   os: "os == 1"
   iso: "idPNetVSjet_2 >= 7"
   antiiso: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
@@ -70,30 +71,19 @@ qcd:
 
 # Bake BDT fake-factor scores into the skims (see README "BDT fake factors").
 fake_factors:
-  models: /eos/home-w/wmatyszk/data_mutau/REAL/outputs/best_models/Run3_2024Thesis_withGlobal
+  models: /eos/home-w/wmatyszk/data_HiggsCP/PNet/REAL/outputs/best_models/Run3_2024Thesis_withGlobal
   channel: et
   processes: [QCD]
   era_label: 0
-  closure:
+  estimate:
     enabled: true
-    process: QCD
-    selection: "os == 0"
-    pass: "idPNetVSjet_2 >= 7"
-    fail: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
-    variables: [pt_2, m_vis, dR, n_bjets, bdt_ff_qcd]
-    metrics: [normalization, shape_chi2, max_significance]
-  # Mixed MUFFIN jet-fake estimate example. To use it, uncomment the kind=ff
-  # process above and switch enabled to true. Required models are derived from
-  # the flags: QCD -> QCD, Wjets -> Wjets, ttbar -> ttbarMC.
-  # estimate:
-  #   enabled: true
-  #   output_process: jet_fakes
-  #   components: {QCD: true, Wjets: true, ttbar: false}
-  #   application_region:
-  #     selection: "os == 1"
-  #     pass: "idPNetVSjet_2 >= 7"
-  #     fail: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
-  #   fake_cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"
+    output_process: jet_fakes
+    components: {QCD: false, Wjets: false, ttbar: false}
+    application_region:
+      selection: "os == 1"
+      pass: "idPNetVSjet_2 >= 7"
+      fail: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
+    fake_cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"
 
 variables:
   pt_1:    {bins: 24, range: [20, 80], label: "$p_{T}^{e}$ [GeV]"}
@@ -112,7 +102,6 @@ variables:
   FastMTT_mass: {bins: 44, range: [30, 250], label: "$m_{FastMTT}$ [GeV]"}
 
 plots:
-  datamc_metrics: [normalization, shape_chi2, max_significance]
   datamc: [pt_1, pt_2, m_vis,
            mt_tot, mt_1, mt_2, met_pt, met_phi, dR, FastMTT_mass,
            n_bjets, Wjets_pred_score, bdt_ff_qcd]
