@@ -373,8 +373,7 @@ class FFModel:
             return multiclass_ff(pred)[0]
         return (1.0 - pred) / pred
 
-    def score(self, frame, systematics: bool, diagnostics_dir: Path | None = None,
-          outlier_threshold: float = 5.0, leg: str = "sublead") -> dict:
+    def score(self, frame, systematics: bool, leg: str = "sublead") -> dict:
         """{column name: np.ndarray} for one engineered feature frame."""
         import numpy as np
         import xgboost as xgb
@@ -382,9 +381,8 @@ class FFModel:
         dmat = xgb.DMatrix(frame[self.features])
         pred = apply_temperature(self.booster.predict(dmat), self.temperature)
 
-        diagnostics = None
         if self.multiclass:
-            score, diagnostics = multiclass_ff(pred)
+            score = multiclass_ff(pred)[0]
         else:
             score = np.full(len(pred), np.nan, dtype=float)
             np.divide(1.0 - pred, pred, out=score, where=pred > 0.0)
@@ -392,19 +390,6 @@ class FFModel:
         tag = score_column(self.process, leg)
         out = {tag: score}
 
-        if diagnostics_dir is not None and diagnostics is not None:
-            summary = summarise_ff_diagnostics(score, diagnostics)
-            summary.update({
-                "process": self.process,
-                "temperature": self.temperature,
-                "features": list(self.features),
-            })
-            write_diagnostic_summary(summary, diagnostics_dir, self.process)
-
-            outliers = build_outlier_frame(
-                frame, score, diagnostics, threshold=outlier_threshold
-            )
-            write_outlier_frame(outliers, diagnostics_dir, self.process)
         if not systematics:
             return out
 
@@ -483,10 +468,6 @@ def augment_table(ff: Any, table):
     """Append the BDT FF score columns to a pyarrow table."""
     import pyarrow as pa
 
-    diagnostics_dir = Path("ff_diagnostics")
-    diagnostics_dir = Path(diagnostics_dir) if diagnostics_dir else None
-    outlier_threshold = getattr(ff, "outlier_threshold", 5.0)
-
     for process in ff.processes:
         model = FFModel(ff.models, ff.channel, process, want_bootstrap=ff.systematics)
         features = list(model.features)
@@ -505,8 +486,6 @@ def augment_table(ff: Any, table):
             scores = model.score(
                 frame,
                 ff.systematics,
-                diagnostics_dir=diagnostics_dir,
-                outlier_threshold=outlier_threshold,
                 leg=leg_name,
             )
             for name, values in scores.items():
@@ -518,174 +497,3 @@ def augment_table(ff: Any, table):
                     table = table.append_column(name, column)
 
     return table
-
-def summarise_ff_diagnostics(score, diagnostics):
-    import numpy as np
-
-    finite = np.isfinite(score)
-    valid_score = score[finite]
-
-    large = finite & (score > 5.0)
-
-    summary = {
-        "n_events": int(len(score)),
-        "n_valid": int(finite.sum()),
-        "n_invalid": int((~finite).sum()),
-        "n_fallback": int(diagnostics["use_fallback"].sum()),
-        "n_small_denominator": int(diagnostics["small_denominator"].sum()),
-        "n_negative_subtracted_ff": int(diagnostics["negative_subtracted_ff"].sum()),
-        "n_invalid_probabilities": int(diagnostics["invalid_probabilities"].sum()),
-        "n_invalid_fallback": int(diagnostics["invalid_fallback"].sum()),
-        "n_ff_gt_2": int(np.sum(valid_score > 2.0)),
-        "n_ff_gt_5": int(np.sum(valid_score > 5.0)),
-        "n_ff_gt_10": int(np.sum(valid_score > 10.0)),
-        "n_ff_gt_20": int(np.sum(valid_score > 20.0)),
-        "sum_ff": float(np.sum(valid_score)),
-        "sum_ff2": float(np.sum(valid_score**2)),
-        "n_large_from_subtraction": int(np.sum(large & ~diagnostics["use_fallback"])),
-        "n_large_from_fallback": int(np.sum(large & diagnostics["use_fallback"])),
-        "n_strong_sr_cancellation": int(diagnostics["strong_sr_cancellation"].sum()),
-        "n_large_with_strong_sr_cancellation": int(
-            np.sum(large & diagnostics["strong_sr_cancellation"])
-    ),
-    }
-
-    if len(valid_score):
-        summary.update({
-            "min_ff": float(np.min(valid_score)),
-            "max_ff": float(np.max(valid_score)),
-            "mean_ff": float(np.mean(valid_score)),
-            "median_ff": float(np.median(valid_score)),
-            "p90_ff": float(np.quantile(valid_score, 0.90)),
-            "p99_ff": float(np.quantile(valid_score, 0.99)),
-            "p999_ff": float(np.quantile(valid_score, 0.999)),
-        })
-    
-    FF_BINS = np.array([
-        0.0, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0, 5.0,
-        10.0, 20.0, 50.0, 100.0, np.inf,
-    ])
-
-    counts, _ = np.histogram(valid_score, bins=FF_BINS)
-    summary["ff_histogram"] = counts.tolist()
-    summary["ff_bins"] = FF_BINS.tolist()
-
-    return summary
-
-def write_diagnostic_summary(summary, output_dir: Path, process: str):
-    import json
-    import os
-    import uuid
-
-    directory = Path(output_dir) / process
-    directory.mkdir(parents=True, exist_ok=True)
-
-    path = directory / f"{os.getpid()}_{uuid.uuid4().hex}.json"
-    temporary_path = path.with_suffix(".tmp")
-
-    with open(temporary_path, "w") as f:
-        json.dump(summary, f, indent=2)
-
-    temporary_path.replace(path)
-
-def merge_diagnostic_summaries(input_dir: Path, output_path: Path):
-    import json
-
-    additive_fields = {
-        "n_events",
-        "n_valid",
-        "n_invalid",
-        "n_fallback",
-        "n_small_denominator",
-        "n_negative_subtracted_ff",
-        "n_invalid_probabilities",
-        "n_invalid_fallback",
-        "n_ff_gt_2",
-        "n_ff_gt_5",
-        "n_ff_gt_10",
-        "n_ff_gt_20",
-        "n_large_from_subtraction",
-        "n_large_from_fallback",
-        "n_strong_sr_cancellation",
-        "n_large_with_strong_sr_cancellation",
-        "sum_ff",
-        "sum_ff2",
-    }
-
-    merged = {}
-    maximum_ff = float("-inf")
-
-    merged_histogram = None
-    ff_bins = None
-
-    for path in Path(input_dir).rglob("*.json"):
-        with open(path) as f:
-            summary = json.load(f)
-
-        histogram = summary.get("ff_histogram")
-        if histogram is not None:
-            if merged_histogram is None:
-                merged_histogram = histogram.copy()
-                ff_bins = summary["ff_bins"]
-            else:
-                if summary["ff_bins"] != ff_bins:
-                    raise ValueError(f"Inconsistent FF bins in {path}")
-                merged_histogram = [
-                    current + added
-                    for current, added in zip(merged_histogram, histogram)
-                ]
-
-        for field in additive_fields:
-            merged[field] = merged.get(field, 0) + summary.get(field, 0)
-
-        maximum_ff = max(maximum_ff, summary.get("max_ff", float("-inf")))
-
-    merged["max_ff"] = maximum_ff
-    merged["max_ff"] = None if maximum_ff == float("-inf") else maximum_ff
-    merged["mean_ff"] = merged.get("sum_ff", 0.0) / max(merged.get("n_valid", 0), 1)
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, "w") as f:
-        json.dump(merged, f, indent=2)
-
-    if merged_histogram is not None:
-        merged["ff_histogram"] = merged_histogram
-        merged["ff_bins"] = ff_bins
-
-    with open(output_path, "w") as f:
-        json.dump(merged, f, indent=2)
-
-def build_outlier_frame(frame, score, diagnostics, threshold=5.0):
-    import pandas as pd
-    import numpy as np
-
-    selected = (
-        (np.isfinite(score) & (score > threshold))
-        | diagnostics["invalid_score"]
-    )
-
-    outliers = frame.loc[selected].copy()
-    outliers["ff"] = score[selected]
-
-    for name, values in diagnostics.items():
-        outliers[name] = values[selected]
-
-    return outliers
-
-def write_outlier_frame(outliers, output_dir: Path, process: str):
-    import os
-    import uuid
-
-    if outliers.empty:
-        return
-
-    directory = Path(output_dir) / process / "outliers"
-    directory.mkdir(parents=True, exist_ok=True)
-
-    path = directory / f"{os.getpid()}_{uuid.uuid4().hex}.parquet"
-    temporary_path = path.with_suffix(".tmp.parquet")
-
-    outliers.to_parquet(temporary_path, index=False)
-    temporary_path.replace(path)
