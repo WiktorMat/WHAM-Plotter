@@ -426,9 +426,8 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
     n = table.num_rows
 
     scale = sample_scale(sample, spec.lumi)
-    if sample.kind == "data":
-        weights = np.ones(n)
-    elif parse(spec.weight).columns <= cols.names:
+    parsed_weight = parse(spec.weight)
+    if parsed_weight.columns <= cols.names:
         weights = cols.eval(spec.weight).astype(float) * scale
     else:
         weights = np.full(n, scale)
@@ -450,7 +449,7 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
 
     nominal_ctx = _Ctx(cols)
 
-    weight_cols = parse(spec.weight).columns if sample.kind != "data" else frozenset()
+    weight_cols = parsed_weight.columns
 
     def ctx_weights(ctx: "_Ctx", factors: dict[str, float]) -> np.ndarray:
         """Per-event weights in this context (re-derived only when the weight

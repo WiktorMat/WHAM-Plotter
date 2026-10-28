@@ -70,8 +70,6 @@ class _Columns:
 def _sample_weights(cfg: AnalysisConfig, sample: Sample, cols: _Columns) -> np.ndarray:
     n = cols._table.num_rows
     scale = sample_scale(sample, cfg.lumi)
-    if sample.kind == "data":
-        return np.ones(n)
     parsed_weight = parse(cfg.weight)
     if parsed_weight.columns <= cols.names:
         return cols.eval(cfg.weight).astype(float) * scale
