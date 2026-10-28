@@ -403,6 +403,58 @@ def _clip_negative(h1, label: str, console=None) -> None:
         view["value"][neg] = 0.0
 
 
+def _clean_nonfinite_template(h1: Any, label: str, console=None) -> None:
+    """Zero irrecoverable non-finite output bins, retaining an audit warning.
+
+    This is a last-resort path for an old histogram cache: once a bin sum is
+    NaN, its valid and invalid event contributions cannot be separated. New
+    fills filter the offending events before accumulation in ``fill_sample``.
+    """
+    view = h1.view(flow=True)
+    bad_value = ~np.isfinite(view["value"])
+    bad_variance = ~np.isfinite(view["variance"])
+    negative_variance = view["variance"] < 0.0
+    if np.any(bad_value):
+        # A variance belonging to a discarded bin must be discarded as well.
+        view["value"][bad_value] = 0.0
+        view["variance"][bad_value] = 0.0
+    variance_only = (bad_variance | negative_variance) & ~bad_value
+    if np.any(variance_only):
+        view["variance"][variance_only] = 0.0
+    if console is not None and (np.any(bad_value) or np.any(variance_only)):
+        console.print(
+            f"  [yellow]cleaned non-finite template '{label}': "
+            f"values={int(np.sum(bad_value))}, "
+            f"variances={int(np.sum(variance_only))}[/yellow]"
+        )
+
+
+def _validate_finite_template(h1: Any, label: str) -> None:
+    """Reject templates that ROOT/RooFit would turn into an invalid PDF.
+
+    A single NaN or infinity in either sumw or sumw2 makes the histogram
+    integral non-finite.  CombineHarvester can still write such a template,
+    but RooFit then reports a NaN ProcessNormalization only at fit time.  Fail
+    at the export boundary instead, while the category/process name and bin
+    are still available.
+    """
+    view = h1.view(flow=True)
+    for field in ("value", "variance"):
+        values = np.asarray(view[field])
+        bad = np.flatnonzero(~np.isfinite(values))
+        if bad.size:
+            raise ValueError(
+                f"template '{label}' has non-finite {field} in flow-bin "
+                f"indices {bad.tolist()}"
+            )
+    negative_variance = np.flatnonzero(np.asarray(view["variance"]) < 0.0)
+    if negative_variance.size:
+        raise ValueError(
+            f"template '{label}' has negative variance in flow-bin indices "
+            f"{negative_variance.tolist()}"
+        )
+
+
 def inject_toy_asymmetry(first_h, second_h, asymmetry: float) -> None:
     """Modulate two templates by (1 +- A*cos(x)) in place — yield-preserving toy."""
     centers = first_h.axes[0].centers
@@ -453,15 +505,16 @@ def fit_templates(
 
         hists = hists_by_cat[cat.name]
         h_datamc = hists[("datamc", cat.variable)]
-        t: dict[str, Any] = {
-            "data_obs": _slice1d(h_datamc, ccfg.data_process(), region)
-        }
+        data_obs = _slice1d(h_datamc, ccfg.data_process(), region)
+        _clean_nonfinite_template(data_obs, f"{cat.name}/data_obs", console)
+        t: dict[str, Any] = {"data_obs": data_obs}
         for proc in ccfg.stack_order():
             # the model acts in main-analysis bins only (a control process
             # sharing a model process name is rejected at load time)
             pm = fit.model.processes.get(proc) if cat.analysis is None else None
             if pm is None or pm.components is None:
                 h1 = _slice1d(h_datamc, proc, region)
+                _clean_nonfinite_template(h1, f"{cat.name}/{proc}", console)
                 _clip_negative(h1, f"{cat.name}/{proc}", console)
                 if h1.view()["value"].sum() <= 0:
                     if pm is None:
@@ -479,6 +532,9 @@ def fit_templates(
                 t[dc_name(proc)] = h1
                 for _syst, suffix, vlabel in shape_slices(cat.name, proc):
                     hv = _slice1d(h_datamc, proc, region, vlabel)
+                    _clean_nonfinite_template(
+                        hv, f"{cat.name}/{proc} {suffix}", console
+                    )
                     _clip_negative(hv, f"{cat.name}/{proc} {suffix}", console)
                     t[f"{dc_name(proc)}_{suffix}"] = hv
             else:
@@ -486,7 +542,18 @@ def fit_templates(
                 comp_hists = []
                 for comp in pm.components:
                     h1 = _slice1d(h_fitcp, proc, comp)
+                    _clean_nonfinite_template(
+                        h1, f"{cat.name}/{proc} {comp}", console
+                    )
                     _clip_negative(h1, f"{cat.name}/{proc} {comp}", console)
+                    label = f"{cat.name}/{proc} {comp}"
+                    _validate_finite_template(h1, label)
+                    total = float(h1.view()["value"].sum())
+                    if total <= 0.0:
+                        raise ValueError(
+                            f"model component '{label}' has non-positive yield "
+                            f"({total:.6g}); it cannot define a Combine PDF"
+                        )
                     comp_hists.append((comp, h1))
                 if fit.toy.asymmetry != 0.0 and len(comp_hists) == 2:
                     inject_toy_asymmetry(comp_hists[0][1], comp_hists[1][1],
@@ -496,6 +563,9 @@ def fit_templates(
                 for _syst, suffix, vlabel in shape_slices(cat.name, proc):
                     for comp in pm.components:
                         hv = _slice1d(h_fitcp, proc, comp, vlabel)
+                        _clean_nonfinite_template(
+                            hv, f"{cat.name}/{proc} {comp} {suffix}", console
+                        )
                         _clip_negative(hv, f"{cat.name}/{proc} {comp} {suffix}", console)
                         t[f"{dc_name(f'{proc}_{comp}')}_{suffix}"] = hv
         # TES grid templates: the morphed process refilled at each grid point
@@ -510,6 +580,9 @@ def fit_templates(
             for f in grid_points(morph.grid):
                 vlabel = "nominal" if abs(f - 1.0) < 1e-9 else morph_point_label(mname, f)
                 hg = _slice1d(h_datamc, morph.process, region, vlabel)
+                _clean_nonfinite_template(
+                    hg, f"{cat.name}/{dcgen} {mname} f={f}", console
+                )
                 _clip_negative(hg, f"{cat.name}/{dcgen} {mname} f={f}", console)
                 total = float(hg.view()["value"].sum())
                 if total <= 0:
@@ -545,6 +618,7 @@ def write_shapes(path: Path, templates: dict[str, dict[str, Any]]) -> None:
         for bin_name, by_name in templates.items():
             for name, h1 in by_name.items():
                 clean = h1.copy()
+                _validate_finite_template(clean, f"{bin_name}/{name}")
                 flow = clean.view(flow=True)
                 for field in ("value", "variance"):
                     flow[field][0] = 0.0
@@ -636,6 +710,11 @@ def write_datacard(
     def allowed(syst, cat: str) -> bool:
         return syst.categories is None or cat in syst.categories
 
+    def lnn_cell(scale_factor) -> str:
+        if isinstance(scale_factor, tuple):
+            return f"{scale_factor[0]:g}/{scale_factor[1]:g}"
+        return f"{scale_factor:g}"
+
     lines = [
         f"# wham {__version__} | fit '{fit.name}' | POIs {', '.join(all_pois(fit))}",
         f"imax {len(cats)}  number of categories",
@@ -659,7 +738,7 @@ def write_datacard(
     for syst in fit.systematics:
         if syst.effect == "lnN":
             cells = [
-                f"{syst.scaleFactor:g}"
+                lnn_cell(syst.scaleFactor)
                 if allowed(syst, c) and syst_matches(syst.processes, n, parents.get(n))
                 else "-"
                 for c, n in columns

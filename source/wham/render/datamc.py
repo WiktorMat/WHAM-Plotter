@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import mplhep as hep
 import numpy as np
 
+from uncertainties.propagation import normalization_variance
 from wham.config import AnalysisConfig
 from wham.jetfakes import FF_PASS, active_estimate
 from wham.render.ffclosure import closure_metrics, metric_lines
@@ -48,7 +49,9 @@ def render_datamc(
         data_unc = np.sqrt(np.maximum(data_view["variance"], 0.0))
 
         mc, mc_sumw2 = total_mc(h, cfg, region)
-        mc_unc = np.sqrt(np.maximum(mc_sumw2, 0.0))
+        norm_down2, norm_up2 = normalization_variance(h, cfg, region)
+        mc_unc_down = np.sqrt(np.maximum(mc_sumw2, 0.0) + norm_down2)
+        mc_unc_up = np.sqrt(np.maximum(mc_sumw2, 0.0) + norm_up2)
 
         fig = plt.figure(figsize=(10, 10))
         gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.06)
@@ -60,8 +63,8 @@ def render_datamc(
             hep.histplot(stack, stack=True, histtype="fill", color=colors,
                          label=labels, edgecolor="black", linewidth=0.5, ax=ax)
 
-        draw_unc_band(ax, edges, np.maximum(mc - mc_unc, 0.0), mc + mc_unc,
-                      label="Stat. unc.")
+        draw_unc_band(ax, edges, np.maximum(mc - mc_unc_down, 0.0), mc + mc_unc_up,
+                      label="Stat. $\\oplus$ norm. unc.")
         ax.errorbar(centers, data, yerr=data_unc, fmt="o", color="black",
                     markersize=5, label="Data", zorder=5)
 
@@ -79,7 +82,7 @@ def render_datamc(
         # legend reads top-of-stack first: Data, then MC top to bottom, band last
         handles, names = ax.get_legend_handles_labels()
         by_label = dict(zip(names, handles))
-        order = ["Data", *reversed(labels), "Stat. unc."]
+        order = ["Data", *reversed(labels), "Stat. $\\oplus$ norm. unc."]
         ax.legend([by_label[n] for n in order if n in by_label],
                   [n for n in order if n in by_label], fontsize=17)
         ax.tick_params(labelbottom=False)
@@ -116,10 +119,11 @@ def render_datamc(
         safe_mc = np.where(mc > 0, mc, np.nan)
         ratio = data / safe_mc
         ratio_unc = data_unc / safe_mc
-        rel_mc = np.where(mc > 0, mc_unc / safe_mc, 0.0)
+        rel_mc_down = np.where(mc > 0, mc_unc_down / safe_mc, 0.0)
+        rel_mc_up = np.where(mc > 0, mc_unc_up / safe_mc, 0.0)
 
         rax.axhline(1.0, linestyle="--", color="black", linewidth=1)
-        draw_unc_band(rax, edges, 1.0 - rel_mc, 1.0 + rel_mc)
+        draw_unc_band(rax, edges, 1.0 - rel_mc_down, 1.0 + rel_mc_up)
         rax.errorbar(centers, ratio, yerr=ratio_unc, fmt="o", color="black", markersize=5)
         rax.set_ylim(0.5, 1.5)
         rax.set_ylabel("Data / MC")

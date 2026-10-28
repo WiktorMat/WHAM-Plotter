@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+import warnings
 
 import numpy as np
 
@@ -459,6 +460,7 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
         return weights
 
     hists: dict[HistKey, Any] = {}
+    dropped_nonfinite: dict[tuple[str, str, str, str], int] = {}
     colmap = dict(spec.var_columns)
 
     def column(var: str) -> str:
@@ -471,12 +473,22 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
         h = hists.get(key)
         if h is None:
             h = hists[key] = make_hist(spec, family, name, vcfg)
+        # boost-histogram propagates one NaN weight into the complete bin sum
+        # and sumw2. Drop only the offending events while they are still
+        # identifiable; replacing an already poisoned output bin would also
+        # discard all valid events accumulated in that bin.
+        finite = np.isfinite(values) & np.isfinite(w)
+        bad = mask & ~finite
+        if np.any(bad):
+            dkey = (family, name, region, variation)
+            dropped_nonfinite[dkey] = dropped_nonfinite.get(dkey, 0) + int(np.sum(bad))
+        clean_mask = mask & finite
         h.fill(
             process=sample.process,
             region=region,
             variation=variation,
-            **{name: values[mask]},
-            weight=w[mask],
+            **{name: values[clean_mask]},
+            weight=w[clean_mask],
         )
 
     def var_data(ctx: "_Ctx", var: str, vcfg: dict) -> tuple[np.ndarray, np.ndarray] | None:
@@ -789,6 +801,15 @@ def fill_sample(sample: Sample, skim: SkimInfo, spec: FillSpec) -> dict[HistKey,
                     values, valid = data
                     fill("datamc", var, vcfg, "OS_antiiso", values, amask & valid,
                          vw, label)
+
+    for (family, name, region, variation), count in sorted(dropped_nonfinite.items()):
+        warnings.warn(
+            f"dropped {count} event(s) with non-finite value/weight while filling "
+            f"sample={sample.name}, process={sample.process}, family={family}, "
+            f"variable={name}, region={region}, variation={variation}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     return hists
 

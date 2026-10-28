@@ -272,7 +272,8 @@ class SystematicCfg(_Model):
     effect: Literal["lnN", "rateParam", "shape"] = "lnN"
     processes: list[str]  # fnmatch patterns over process/template names
     categories: list[str] | None = None  # restrict to these bins; default all
-    scaleFactor: float | None = Field(default=None, gt=0)  # lnN only
+    # symmetric factor, or [Down, Up] factors for an asymmetric lnN
+    scaleFactor: float | tuple[float, float] | None = None  # lnN only
     init: float = 1.0  # rateParam starting value
     range: tuple[float, float] | None = None  # rateParam bounds, e.g. [0.1, 5]
     # shape only: replacement expressions for the per-event weight (or, when
@@ -293,6 +294,10 @@ class SystematicCfg(_Model):
         if self.effect == "lnN":
             if self.scaleFactor is None:
                 raise ValueError(f"systematic '{self.name}': lnN needs a scaleFactor")
+            factors = ((self.scaleFactor,) if isinstance(self.scaleFactor, float)
+                       else self.scaleFactor)
+            if any(factor <= 0 for factor in factors):
+                raise ValueError(f"systematic '{self.name}': scaleFactor must be > 0")
             if self.range is not None or self.init != 1.0:
                 raise ValueError(f"systematic '{self.name}': init/range are rateParam-only")
             if has_weights or has_scales:
@@ -796,6 +801,36 @@ def load_fit_config(
     cfg = _load(fit.analysis)
     cat_cfgs = {c.name: (_load(c.analysis) if c.analysis is not None else cfg)
                 for c in fit.categories}
+
+    # Normalization-only nuisances need no alternative event inputs.  Attach
+    # the shared defaults automatically, preserving an explicit same-name
+    # definition from the fit YAML as an override.
+    from uncertainties.registry import DEFAULT_NORMALIZATION_UNCERTAINTIES
+
+    declared = {s.name.lower() for s in fit.systematics}
+    aliases = {
+        "lumi": {"lumi", "lumi_13p6tev", "lumi_13p6tev_2223"},
+        "dy_xs": {"dy_xs", "xsec_dy", "cross_section_z"},
+        "top_xs": {"top_xs", "xsec_tt", "xsec_top", "cross_section_ttbar"},
+    }
+    automatic = []
+    for uncertainty in DEFAULT_NORMALIZATION_UNCERTAINTIES:
+        processes = sorted({
+            process
+            for acfg in loaded.values()
+            for process in uncertainty.processes(acfg)
+        })
+        already_declared = bool(declared & aliases.get(
+            uncertainty.name, {uncertainty.name.lower()}))
+        if processes and not already_declared:
+            automatic.append(SystematicCfg(
+                name=uncertainty.name,
+                effect="lnN",
+                processes=processes,
+                scaleFactor=uncertainty.factors,
+            ))
+    if automatic:
+        fit = fit.model_copy(update={"systematics": [*fit.systematics, *automatic]})
 
     # ---- cross-validation against the analysis configs
     for cat in fit.categories:
