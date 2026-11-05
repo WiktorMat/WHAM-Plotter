@@ -32,8 +32,8 @@ def _rlabel(cfg: AnalysisConfig) -> str:
     return rlabel
 
 
-def cms_label(ax, cfg: AnalysisConfig) -> None:
-    hep.cms.label(cfg.style.cms_label, data=True, rlabel=_rlabel(cfg), ax=ax)
+def cms_label(ax, cfg: AnalysisConfig, *, data: bool = True) -> None:
+    hep.cms.label(cfg.style.cms_label, data=data, rlabel=_rlabel(cfg), ax=ax)
 
 
 def cms_label_split(ax_left, ax_right, cfg: AnalysisConfig) -> None:

@@ -357,6 +357,9 @@ class DecayModeSplitCfg(_Model):
 class PlotsCfg(_Model):
     resolution: list[tuple[str, str]] = []  # [reco, reference] pairs
     datamc: list[str] = []
+    # Rendering-only blinding: keep data available to data-driven background
+    # estimates, but do not draw signal-region data or data/MC diagnostics.
+    datamc_blind: bool = False
     datamc_metrics: list[
         Literal["normalization", "shape_chi2", "max_significance"]
     ] = []

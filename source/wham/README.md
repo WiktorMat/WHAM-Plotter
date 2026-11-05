@@ -48,6 +48,9 @@ then `python3 -m wham.cli ...`.
   (or inline under `sample_params`). MC scale = `lumi * xs * filter_efficiency / eff`.
 - `plots`: families `resolution` ([reco, ref] pairs), `datamc`,
   `cp` (CP-even vs CP-odd weights), `display3d`.
+- `plots.datamc_blind: true` hides signal-region data, the Data/MC ratio and
+  data-vs-prediction metrics only while rendering. Data remain available to
+  the data-driven QCD/jet-fake estimate.
 - Resolution binning: define a variable named `<reco>_from_<ref>` to control it,
   otherwise a sensible default is used ((reco−ref)/ref in [−2, 2]).
 

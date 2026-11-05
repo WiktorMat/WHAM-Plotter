@@ -31,14 +31,19 @@ def test_required_columns(workspace: dict) -> None:
 
 def test_datamc_metrics_are_optional_render_config(workspace: dict) -> None:
     cfg = load_config(workspace["yaml"])
+    assert cfg.plots.datamc_blind is False
     assert cfg.plots.datamc_metrics == []
     before = cfg.required_columns()
 
     plots = cfg.plots.model_copy(
-        update={"datamc_metrics": ["normalization", "shape_chi2", "max_significance"]}
+        update={
+            "datamc_blind": True,
+            "datamc_metrics": ["normalization", "shape_chi2", "max_significance"],
+        }
     )
     cfg = cfg.model_copy(update={"plots": plots})
 
+    assert cfg.plots.datamc_blind is True
     assert cfg.plots.datamc_metrics == [
         "normalization",
         "shape_chi2",
