@@ -62,16 +62,17 @@ def test_scores_in_skims_and_ff_qcd(workspace, models_dir) -> None:
     h = hists[("datamc", "m_vis")]
     assert list(h.axes["region"]) == ["OS_iso", "OS_antiiso"]
 
-    # data in OS_antiiso must be the plain counts weighted by the FF score
+    # Data uses the configured event weight as well as the FF score.
     data_sample = next(s for s in samples if s.kind == "data")
     df = pq.read_table(skims[data_sample.name].path).to_pandas()
     df = df[(df.pt_1 > 25) & (df.eta_1.abs() < 2.4) & (df.trg == 1) & (df.os == 1)]
     anti = df[(df.id_2 > 1) & (df.id_2 < 5) & (df.m_vis >= 0) & (df.m_vis < 250)]
-    expected = anti["BDT_FF_score_QCD_sublead"].sum()
+    combined_weight = anti["weight"] * anti["BDT_FF_score_QCD_sublead"]
+    expected = combined_weight.sum()
     got = h[{"process": "data", "region": "OS_antiiso", "variation": "nominal"}]
     assert float(got.view()["value"].sum()) == pytest.approx(float(expected), rel=1e-9)
     # and the variance is the sum of squared FF weights
-    expected_w2 = (anti["BDT_FF_score_QCD_sublead"] ** 2).sum()
+    expected_w2 = (combined_weight ** 2).sum()
     assert float(got.view()["variance"].sum()) == pytest.approx(float(expected_w2), rel=1e-9)
 
     # QCD estimate lands in the signal region as clip(data - mc, 0)

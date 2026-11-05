@@ -81,6 +81,12 @@ model:
 # `processes` are fnmatch patterns over process names (config names like
 # "W+jets" work; split processes match through their parent). Optional
 # `categories: [...]` restricts a systematic to specific bins.
+#
+# WHAM automatically adds the normalization-only defaults from
+# source/uncertainties/: luminosity, DY cross section and top cross section.
+# They are also used in the uncertainty band of `wham plot`.  Declaring the
+# same nuisance (or a recognized alias such as lumi_13p6TeV/xsec_dy/xsec_tt)
+# here overrides the corresponding default for the fit.
 # ---------------------------------------------------------------------------
 systematics:
   - {name: lumi_13p6TeV, effect: lnN, processes: [tt, dibosons, "W+jets", "DY_*"], scaleFactor: 1.025}

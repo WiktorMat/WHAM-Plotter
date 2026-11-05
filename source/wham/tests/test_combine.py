@@ -588,6 +588,18 @@ def test_shapes_roundtrip(fit_setup, tmp_path: Path) -> None:
                 assert np.allclose(rh.variances(), h1.view()["variance"]), (cat, name)
 
 
+@pytest.mark.parametrize("field", ["value", "variance"])
+def test_write_shapes_rejects_nonfinite_templates(tmp_path: Path, field: str) -> None:
+    import hist
+
+    h = hist.Hist(hist.axis.Regular(2, 0, 2), storage=hist.storage.Weight())
+    h.fill([0.5, 1.5], weight=[1.0, 1.0])
+    h.view()[field][1] = np.nan
+
+    with pytest.raises(ValueError, match=rf"cat/signal.*non-finite {field}"):
+        write_shapes(tmp_path / "bad.root", {"cat": {"signal": h}})
+
+
 def test_datacard_multibin(fit_setup, tmp_path: Path) -> None:
     s = fit_setup(
         "scale", two_cats=True,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -37,7 +38,7 @@ def _reference_frame(sample, cfg):
     )
     df = df[sel].copy()
     scale = sample_scale(sample, cfg.lumi)
-    df["w"] = 1.0 if sample.kind == "data" else df.weight * scale
+    df["w"] = df.weight * scale
     return df
 
 
@@ -59,7 +60,13 @@ def test_datamc_regions_partition(filled: dict) -> None:
             h[{"process": "data", "region": region, "variation": "nominal"}]
             .view()["value"].sum()
         )
-        assert got == pytest.approx(float(mask.sum())), region
+        assert got == pytest.approx(float(df.loc[mask, "w"].sum())), region
+
+        variance = float(
+            h[{"process": "data", "region": region, "variation": "nominal"}]
+            .view()["variance"].sum()
+        )
+        assert variance == pytest.approx(float((df.loc[mask, "w"] ** 2).sum())), region
 
 
 def test_resolution_relative_formula(filled: dict) -> None:
@@ -133,6 +140,40 @@ def test_fitcp_signal_region_templates(workspace: dict) -> None:
         assert float(
             h[{"process": proc, "region": "even", "variation": "nominal"}].view()["value"].sum()
         ) == 0.0
+
+
+def test_fitcp_drops_nonfinite_component_weights(workspace: dict) -> None:
+    from wham.config import ComponentFillCfg
+
+    source = workspace["data_dir"] / "TT_test" / "nominal" / "merged.parquet"
+    table = pq.read_table(source)
+    idx = table.schema.get_field_index("wt_cp_sm")
+    table = table.set_column(
+        idx, "wt_cp_sm", pa.array(np.full(table.num_rows, np.nan))
+    )
+    pq.write_table(table, source)
+
+    cfg = load_config(workspace["yaml"])
+    plots = cfg.plots.model_copy(
+        update={"fitcp": [ComponentFillCfg(
+            var="met_phi", process="TT",
+            components={"even": "wt_cp_sm", "odd": "wt_cp_ps"},
+        )]}
+    )
+    cfg = cfg.model_copy(update={"plots": plots})
+    samples, _ = discover_samples(cfg)
+    skims = ensure_skims(cfg, samples, workers=1)
+    spec = build_fill_spec(cfg, families=["fitcp"])
+    sample = next(s for s in samples if s.name == "TT_test")
+
+    with pytest.warns(RuntimeWarning, match="non-finite.*region=even"):
+        hists = fill_sample(sample, skims[sample.name], spec)
+
+    h = hists[("fitcp", "met_phi")]
+    assert np.isfinite(h.view()["value"]).all()
+    assert np.isfinite(h.view()["variance"]).all()
+    assert h[{"process": "TT", "region": "even"}].view()["value"].sum() == 0.0
+    assert h[{"process": "TT", "region": "odd"}].view()["value"].sum() > 0.0
 
 
 def test_ffcheck_raw_vs_weighted(workspace: dict) -> None:
@@ -229,7 +270,7 @@ def test_process_cut_filters_events(workspace: dict) -> None:
     data = next(s for s in samples if s.kind == "data")
     ddf = _reference_frame(data, cfg)
     ddf = ddf[(ddf.trg == 1) & (ddf.m_vis >= 0) & (ddf.m_vis < 250)]
-    d_expect = float(((ddf.os == 1) & (ddf.id_2 >= 5)).sum())
+    d_expect = float(ddf.loc[(ddf.os == 1) & (ddf.id_2 >= 5), "w"].sum())
     d_got = float(h[{"process": "data", "region": "OS_iso",
                      "variation": "nominal"}].view()["value"].sum())
     assert d_got == pytest.approx(d_expect)

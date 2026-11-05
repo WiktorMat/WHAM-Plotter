@@ -87,6 +87,13 @@ plots:
   datamc: [m_vis, m_vis_coarse, m_vis_tails, pt_1]
   resolution: [[pt_1, pt_2]]     # [reco, reference]
 
+# Optional cumulative decay-mode plots.  Level 1: inclusive only; level 2:
+# pi/rho/a1 versus anything; level 3: also every concrete tt combination.
+decay_mode_split:
+  level: 3                       # 1, 2, or 3
+  channel: tt                    # mt, et, or tt
+  column: decayModePNet          # alternatively: decayMode
+
 style:                           # CMS label cosmetics (all optional)
   cms_label: "Private Work"      # or Preliminary, Simulation, ...
   era: "2024"                    # shown next to the lumi
@@ -111,6 +118,12 @@ Notes:
 - MC scale = `lumi * xs * filter_efficiency / eff`; per-event `weight` column on top.
 - Resolution binning: define a variable named `<reco>_from_<ref>` to customize,
   otherwise defaults apply ((reco−ref)/ref in [−2, 2]; Δ wrapped to [−π, π] for angles).
+- Decay-mode splitting is cumulative.  The inclusive plots are always written
+  normally.  At level 2, `mt`/`et` add `mu-pi`, `mu-rho`, ... / `e-pi`,
+  `e-rho`, ... directories; `tt` adds `pi-anything`, `anything-pi`, etc.
+  Level 3 additionally writes all nine `tt` pairs (for example `a1-a1` and
+  `a1-rho`) below `split_by_decay_modes/`.  PNet modes 1+2 form `rho` and
+  modes 10+11 form `a1`; with `decayMode`, rho is 1 and a1 is 10+11.
 
 ## BDT fake factors (muffin)
 
@@ -154,6 +167,17 @@ Two model layouts are recognized: `<models>/<channel>_<process>/best_model.json`
 is picked up automatically. Skims are keyed on the model files, so retraining
 triggers exactly one skim rebuild; removing the block returns to the previous
 skims untouched.
+
+Each model's saved XGBoost `feature_names` determines its inputs and their order.
+QCD and Wjets can use different feature sets (for example, only Wjets may require
+`ip_LengthSig`). Skim reads include the union of their inputs. Unsuffixed tau
+features refer to leg 2; `_other` refers to leg 1, while explicit `_1`/`_2`
+names keep their physical leg numbering. `jpt_pt` is read from `jpt_pt_2` when
+available, otherwise calculated from `seeding_jpt_2` (or `jpt_2`) divided by
+`pt_2` and clipped at zero. New raw global columns can be used directly by name;
+new derived quantities require a recipe in `wham/muffin.py`. Missing required
+inputs produce an error identifying the process and feature. Models must retain
+their feature names; unnamed positional inputs cannot be inferred safely.
 
 ## Cleaning caches
 

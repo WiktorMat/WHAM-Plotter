@@ -83,6 +83,34 @@ The output files will be written to the `outputs` directory. For example, the re
 outputs/wham_phi_cp/alpha_cmb.pdf
 ```
 
+### Mu-tau CP export
+
+The dedicated non-KinFit mu-tau export uses the CP signal region
+(`iso_1 < 0.15`, `mt_1 < 65`) and the current MUFFIN fake-factor model:
+
+```bash
+PYTHONPATH=source python -m wham.cli fit \
+  Configurations/fits/phi_cp_mutau_combine_export.yaml --shapes-only
+```
+
+This stages:
+
+```text
+external_examples/Combine_HtautauCP/cpdatacards/wham_phi_cp_mutau/added_histo_mt-mergeXbins.root
+```
+
+After copying or linking the staged directory into the CMSSW checkout, run:
+
+```bash
+python3 scripts/run_scan.py -c configs/harvestDatacards_wham_phi_cp_mutau.yml
+```
+
+The resulting scan is written to:
+
+```text
+outputs/wham_phi_cp_mutau/alpha_cmb.pdf
+```
+
 > **Warning**
 >
 > Combine reuses existing output files if they are already present. Therefore, if you rerun the fit with updated datacards, make sure to either remove the previous output directory or change the output path in the configuration file (e.g. `configs/harvestDatacards_wham_phi_cp.yml`). Otherwise, stale results may be reused.
