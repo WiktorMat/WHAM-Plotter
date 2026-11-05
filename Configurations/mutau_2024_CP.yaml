@@ -1,0 +1,150 @@
+# WHAM analysis config for Run 3 2024 mu-tau Phi_CP studies.
+#
+# Run with:
+#   wham plot Configurations/mutau_2024_CP.yaml
+#
+# The fake-background model follows mutau_2024.yaml.  The lepton isolation and
+# transverse-mass cuts select the CP signal region expected by the
+# Combine_HtautauCP categories carrying the mTLt65 suffix.
+# The CP observables use the columns available in columns.txt; the mu-a1
+# category uses the requested FASTMTT mass-constraint definition.
+
+name: mutau_2024_CP
+lumi: 109080.0
+data_dir: /eos/home-w/wmatyszk/data_mutau/Run3_2024/mt
+output_dir: plots/mutau_2024_CP
+
+style:
+  cms_label: "Private Work"
+  era: "2024"
+  com: 13.6
+
+# The VSjet requirement is applied through qcd.iso rather than in the baseline,
+# so the fake-factor application region remains populated.
+selection: >
+  pt_1 > 26 & pt_2 > 30
+  & abs(eta_1) < 2.4 & abs(eta_2) < 2.5
+  & ip_z_1 < 0.2 & ip_z_2 < 0.2
+  & iso_1 < 0.15
+  & mt_1 < 65
+  & dR > 0.5
+  & idDeepTau2018v2p5VSe_2 >= 2
+  & idDeepTau2018v2p5VSmu_2 >= 4
+  & (
+    (decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25)
+      | (decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15)
+      | (decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15)
+      | (decayModePNet_2 == 10 & hasRefitSV_2)
+    )
+
+trigger: "trg_singlemuon == 1"
+weight: weight
+
+# Order is the bottom-to-top stack order.  The Higgs pattern deliberately uses
+# the SM filtered sample as the nominal source for the CP reweighting templates;
+# using SM, PS and MM production samples together would triple-count the signal.
+processes:
+  jet_fakes: {kind: ff, color: "tab:olive", label: "jet$\\rightarrow\\tau_{h}$"}
+  QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}
+  dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
+  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$"}
+  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red", label: "W+jets",
+             cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
+  W_jfake:  {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "lightcoral",
+             label: "W (jet$\\rightarrow\\tau_{h}$)",
+             cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6",
+             ff_component: Wjets}
+  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue",
+             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$, $\\mu\\rightarrow\\tau_{h}$"}
+  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
+             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$"}
+  ggH:        {samples: ["GluGluHTo2Tau_UncorrelatedDecay_SM_Filtered_ProdAndDecay"],
+               color: "tab:green", label: "ggH, $H\\rightarrow\\tau\\tau$"}
+  data:       {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
+
+qcd:
+  method: ff
+  os: "os == 1"
+  iso: "idDeepTau2018v2p5VSjet_2 >= 7"
+  antiiso: "idDeepTau2018v2p5VSjet_2 >= 1 & idDeepTau2018v2p5VSjet_2 < 7"
+  ff_weight: "BDT_FF_score_QCD_sublead"
+
+fake_factors:
+  models: /eos/home-w/wmatyszk/data_mutau/REAL/outputs/best_models/Run3_2024Thesis_withGlobal
+  channel: mt
+  processes: [QCD]
+  era_label: 0
+  closure:
+    enabled: true
+    process: QCD
+    selection: "os == 0"
+    pass: "idDeepTau2018v2p5VSjet_2 >= 7"
+    fail: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 7"
+    variables: [pt_2, m_vis, dR, bdt_ff_qcd]
+    metrics: [normalization, shape_chi2, max_significance]
+  estimate:
+    enabled: true
+    output_process: jet_fakes
+    components: {QCD: true, Wjets: true, ttbar: false}
+    application_region:
+      selection: "os == 1"
+      pass: "idDeepTau2018v2p5VSjet_2 >= 7"
+      fail: "idDeepTau2018v2p5VSjet_2 > 1 & idDeepTau2018v2p5VSjet_2 < 7"
+    fake_cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"
+
+variables:
+  pt_1:   {bins: 24, range: [20, 80], label: "$p_{T}^{\\mu}$ [GeV]"}
+  pt_2:   {bins: 24, range: [20, 80], label: "$p_{T}^{\\tau_{h}}$ [GeV]"}
+  eta_1:  {bins: 24, range: [-2.4, 2.4], label: "$\\eta_{\\mu}$"}
+  eta_2:  {bins: 25, range: [-2.5, 2.5], label: "$\\eta_{\\tau_{h}}$"}
+  m_vis:  {bins: 40, range: [0, 200], label: "$m_{vis}$ [GeV]"}
+  mt_1:   {bins: 40, range: [0, 200], label: "$m_{T}(\\mu)$ [GeV]"}
+  mt_tot: {bins: 40, range: [0, 200], label: "$m_{T}^{tot}$ [GeV]"}
+  met_pt: {bins: 40, range: [0, 200], label: "$p_{T}^{miss}$ [GeV]"}
+  dR:     {bins: 40, range: [0, 5], label: "$\\Delta R(\\mu,\\tau_{h})$"}
+  n_jets: {bins: 7, range: [-0.5, 6.5], label: "$N_{jets}$"}
+  n_bjets: {bins: 5, range: [-0.5, 4.5], label: "$N_{b\\mathrm{-jets}}$"}
+  bdt_ff_qcd: {column: BDT_FF_score_QCD_sublead, bins: 45, range: [0, 0.45],
+               label: "BDT FF score (QCD)"}
+
+  # The score binning is intentionally coarse for the first low-statistics fit.
+  bdt_cp: {column: BDT_pred_score, bins: [0.33, 0.57, 0.68, 0.77, 0.85, 1.0],
+           label: "BDT score"}
+  aco_mu_pi: {bins: 8, range: [0, 6.283185307179586],
+              label: "$\\phi_{CP}(\\mu\\pi)$", kind: angle}
+  aco_mu_rho: {bins: 10, range: [0, 6.283185307179586],
+               label: "$\\phi_{CP}(\\mu\\rho)$", kind: angle}
+  aco_mu_a1: {column: aco_mu_a1_FASTMTT_MassConstraint, bins: 10,
+              range: [0, 6.283185307179586],
+              label: "$\\phi_{CP}(\\mu a_{1})$", kind: angle}
+
+  MVA_vs_aco_mu_pi: {unroll: [aco_mu_pi, bdt_cp],
+                     label: "BDT score x $\\phi_{CP}(\\mu\\pi)$"}
+  MVA_vs_aco_mu_rho: {unroll: [aco_mu_rho, bdt_cp],
+                      label: "BDT score x $\\phi_{CP}(\\mu\\rho)$"}
+  MVA_vs_aco_mu_a1: {unroll: [aco_mu_a1, bdt_cp],
+                     label: "BDT score x $\\phi_{CP}(\\mu a_{1})$"}
+
+plots:
+  datamc_metrics: [normalization, shape_chi2, max_significance]
+  datamc:
+    - bdt_cp
+    - MVA_vs_aco_mu_pi
+    - MVA_vs_aco_mu_rho
+    - MVA_vs_aco_mu_a1
+    - pt_1
+    - pt_2
+    - eta_1
+    - eta_2
+    - m_vis
+    - mt_1
+    - mt_tot
+    - met_pt
+    - dR
+    - n_jets
+    - n_bjets
+    - bdt_ff_qcd
+  cp:
+    - {var: aco_mu_pi, even: wt_cp_sm, odd: wt_cp_ps}
+    - {var: aco_mu_rho, even: wt_cp_sm, odd: wt_cp_ps}
+    - {var: aco_mu_a1, even: wt_cp_sm, odd: wt_cp_ps}

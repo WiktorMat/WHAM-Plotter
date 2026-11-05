@@ -629,14 +629,31 @@ def write_shapes(path: Path, templates: dict[str, dict[str, Any]]) -> None:
 def _rename_templates(
     templates: dict[str, dict[str, Any]], process_map: dict[str, str]
 ) -> dict[str, dict[str, Any]]:
-    """Return a shallow template map with datacard process names remapped."""
+    """Return a shallow template map with datacard process names remapped.
+
+    Shape templates carry the process name as a prefix
+    (``process_nuisanceUp``).  Rename that prefix too; otherwise an external
+    datacard referring to the mapped process (for example ``TTT``) cannot find
+    variations exported under the analysis name (``tt_nuisanceUp``).
+    """
     if not process_map:
         return templates
+
+    # Longest first makes mappings unambiguous when one process name is a
+    # prefix of another (for example W and W_jfake).
+    mappings = sorted(process_map.items(), key=lambda item: len(item[0]), reverse=True)
+
+    def mapped_name(name: str) -> str:
+        for source, target in mappings:
+            if name == source:
+                return target
+            if name.startswith(f"{source}_"):
+                return f"{target}{name[len(source):]}"
+        return name
+
     mapped: dict[str, dict[str, Any]] = {}
     for bin_name, by_name in templates.items():
-        mapped[bin_name] = {
-            process_map.get(name, name): h1 for name, h1 in by_name.items()
-        }
+        mapped[bin_name] = {mapped_name(name): h1 for name, h1 in by_name.items()}
     return mapped
 
 

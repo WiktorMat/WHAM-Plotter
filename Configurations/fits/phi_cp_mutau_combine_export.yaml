@@ -1,0 +1,103 @@
+# Export-only WHAM configuration for the mt -> Combine_HtautauCP workflow.
+#
+# Run from the WHAM repository root:
+#   PYTHONPATH=source python -m wham.cli fit \
+#     Configurations/fits/phi_cp_mutau_combine_export.yaml --shapes-only
+#
+# WHAM owns event selection, fake-factor estimation and histogram filling.
+# Combine_HtautauCP owns the alpha model, datacards, workspace and likelihood
+# scan.  The component names below therefore follow its $PROCESS$MASS contract.
+
+name: phi_cp_mutau_combine_export
+analysis: mutau_2024_CP
+
+categories:
+  - name: mt_mva_tau_mTLt65
+    variable: bdt_cp
+    cut: "BDT_pred_class == 0 & ip_LengthSig_1 >= 1.0"
+
+  - name: mt_mva_fake_mTLt65
+    variable: bdt_cp
+    cut: "BDT_pred_class == 2 & ip_LengthSig_1 >= 1.0"
+
+  - name: mt_higgs_murho_mTLt65
+    variable: MVA_vs_aco_mu_rho
+    cut: >
+      BDT_pred_class == 1
+      & ip_LengthSig_1 >= 1.0
+      & decayMode_2 == 1
+      & decayModePNet_2 == 1
+      & pion_E_split_2 > 0.15
+
+  - name: mt_higgs_mupi_mTLt65
+    variable: MVA_vs_aco_mu_pi
+    cut: >
+      BDT_pred_class == 1
+      & ip_LengthSig_1 >= 1.0
+      & decayModePNet_2 == 0
+      & ip_LengthSig_2 >= 1.25
+
+  - name: mt_higgs_mua1_mTLt65
+    variable: MVA_vs_aco_mu_a1
+    cut: >
+      BDT_pred_class == 1
+      & ip_LengthSig_1 >= 1.0
+      & decayModePNet_2 == 10
+      & hasRefitSV_2
+
+  # PNet DM2 is the one-prong a1-like category in the external workflow.  The
+  # available non-KinFit angular observable for it is aco_mu_rho.
+  - name: mt_higgs_mua11pr_mTLt65
+    variable: MVA_vs_aco_mu_rho
+    cut: >
+      BDT_pred_class == 1
+      & ip_LengthSig_1 >= 1.0
+      & decayMode_2 == 1
+      & decayModePNet_2 == 2
+      & pion_E_split_2 > 0.15
+
+model:
+  pois:
+    # Dummy dependency required by the WHAM schema.  The external physics model
+    # defines alpha in degrees and applies the actual sm/ps/mm scaling.
+    alpha: {init: 0.0, range: [-90.0, 90.0]}
+  processes:
+    ggH:
+      components:
+        sm_prod_sm_htt125: {weight: wt_cp_sm, scale: "alpha*0 + 1"}
+        ps_prod_sm_htt125: {weight: wt_cp_ps, scale: "alpha*0 + 1"}
+        mm_prod_sm_htt125: {weight: wt_cp_mm, scale: "alpha*0 + 1"}
+
+# Stage only the two available b-tag nuisances.  These are full alternative
+# b-tag event weights, while `weight` already contains w_BTag_ID, so the ratio
+# replaces the nominal b-tag factor rather than applying a second SF.
+# Remove/comment these entries for a nominal-only export.
+systematics:
+  - name: BTag_ID_correlated
+    effect: shape
+    processes: [dibosons, tt, DY_2Mu, DY_2Tau, ggH]
+    weight_up: "weight * w_BTag_ID_correlatedUp / w_BTag_ID"
+    weight_down: "weight * w_BTag_ID_correlatedDown / w_BTag_ID"
+  - name: BTag_ID_uncorrelated_Run3_2024
+    effect: shape
+    processes: [dibosons, tt, DY_2Mu, DY_2Tau, ggH]
+    weight_up: "weight * w_BTag_ID_uncorrelated_Run3_2024Up / w_BTag_ID"
+    weight_down: "weight * w_BTag_ID_uncorrelated_Run3_2024Down / w_BTag_ID"
+scans:
+  - {pois: [alpha], points: 37, range: [-90.0, 90.0]}
+asimov: {enabled: false}
+toy: {asymmetry: 0.0}
+auto_mc_stats: null
+
+export:
+  target: combine_htautaucp
+  stage_dir: external_examples/Combine_HtautauCP/cpdatacards/wham_phi_cp_mutau
+  output_file: added_histo_mt-mergeXbins.root
+  write_native_datacard: false
+  write_manifest: true
+  process_map:
+    DY_2Tau: ZTT
+    DY_2Mu: ZL
+    tt: TTT
+    dibosons: VVT
+    jet_fakes: JetFakes

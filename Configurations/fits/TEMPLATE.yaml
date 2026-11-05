@@ -97,6 +97,16 @@ systematics:
   #    weight_down: "BDT_FF_score_QCD_sublead_BkgSub_down"}
   # - {name: tt_reweight, effect: shape, processes: [tt],
   #    weight_up: "weight * wt_tt_up", weight_down: "weight * wt_tt_down"}
+  # Full alternative SF weights must replace their nominal factor.  Example
+  # for the two 2024 b-tag nuisances when `weight` contains w_BTag_ID:
+  # - {name: BTag_ID_correlated, effect: shape,
+  #    processes: [tt, dibosons, "W+jets", "DY_*", ggH],
+  #    weight_up: "weight * w_BTag_ID_correlatedUp / w_BTag_ID",
+  #    weight_down: "weight * w_BTag_ID_correlatedDown / w_BTag_ID"}
+  # - {name: BTag_ID_uncorrelated_Run3_2024, effect: shape,
+  #    processes: [tt, dibosons, "W+jets", "DY_*", ggH],
+  #    weight_up: "weight * w_BTag_ID_uncorrelated_Run3_2024Up / w_BTag_ID",
+  #    weight_down: "weight * w_BTag_ID_uncorrelated_Run3_2024Down / w_BTag_ID"}
 
 # ---------------------------------------------------------------------------
 # Likelihood scans (MultiDimFit). One POI -> 1D profiled scan; two POIs ->
