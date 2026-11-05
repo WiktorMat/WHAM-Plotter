@@ -1,0 +1,129 @@
+# Blinded b-veto optimisation for the Run 3 2024 mu-tau analysis.
+#
+# Run with:
+#   python scripts/study_bveto.py Configurations/mutau_2024_bveto_study.yaml
+#
+# This configuration deliberately has no b-jet veto in `selection`.  The study
+# derives no-veto, <=1 and ==0 categories from the unrolled histograms below.
+# Signal-region data are used only internally by WHAM's MUFFIN FF estimate; the
+# study script refuses to run unless plots.datamc_blind is true and never writes
+# data histograms, histogram sidecars or histogram-cache files.
+
+name: mutau_2024_bveto_study
+lumi: 109080.0
+data_dir: /eos/home-w/wmatyszk/data_HiggsCP/PNet/Run3_2024/mt
+output_dir: plots/mutau_2024_bveto_study
+
+style:
+  cms_label: "Private Work"
+  era: "2024"
+  com: 13.6
+
+selection: >
+  pt_1 > 26 & pt_2 > 30
+  & abs(eta_1) < 2.4 & abs(eta_2) < 2.5
+  & abs(ip_z_1) < 0.2 & abs(ip_z_2) < 0.2
+  & iso_1 < 0.15
+  & mt_1 < 65
+  & dR > 0.5
+  & ip_LengthSig_1 >= 1.0
+  & idDeepTau2018v2p5VSe_2 >= 2
+  & idDeepTau2018v2p5VSmu_2 >= 4
+  & (
+    (decayModePNet_2 == 0 & ip_LengthSig_2 >= 1.25)
+      | (decayMode_2 == 1 & decayModePNet_2 == 1 & pion_E_split_2 > 0.15)
+      | (decayMode_2 == 1 & decayModePNet_2 == 2 & pion_E_split_2 > 0.15)
+      | (decayModePNet_2 == 10 & hasRefitSV_2)
+      | (decayModePNet_2 == 11 & hasRefitSV_2)
+    )
+
+trigger: "trg_singlemuon == 1"
+weight: weight
+
+processes:
+  jet_fakes: {kind: ff, color: "tab:olive", label: "jet$\\rightarrow\\tau_{h}$"}
+  QCD:      {kind: qcd, color: "tab:olive", label: "QCD multi-jet"}
+  dibosons: {samples: ["WW", "WZ", "ZZ"], color: "tab:brown", label: "Multiboson"}
+  tt:       {samples: ["TTto*", "ST_tW_*"], color: "tab:purple", label: "$t\\bar{t}$ + single top"}
+  W+jets:   {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "lightcoral", label: "W+jets",
+             cut: "genPartFlav_2 != 0 & genPartFlav_2 != 6"}
+  W_jfake:  {samples: ["WtoMuNu_*", "WtoTauNu_*"], color: "tab:red",
+             label: "W (jet$\\rightarrow\\tau_{h}$)",
+             cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6",
+             ff_component: Wjets}
+  DY_2Mu:   {samples: ["DYto2Mu_*"], color: "tab:blue",
+             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$, $\\mu\\rightarrow\\tau_{h}$"}
+  DY_2Tau:  {samples: ["DYto2Tau_*"], color: "tab:orange",
+             label: "$Z\\rightarrow\\tau_{\\mu}\\tau_{h}$"}
+  Higgs:    {samples: ["GluGluHTo2Tau_UncorrelatedDecay_SM_Filtered_ProdAndDecay",
+                       "VBFHToTauTau_UncorrelatedDecay_Filtered",
+                       "WminusHToTauTau_UncorrelatedDecay_Filtered",
+                       "WplusHToTauTau_UncorrelatedDecay_Filtered",
+                       "ZHToTauTau_UncorrelatedDecay_Filtered"],
+             color: "tab:green", label: "$H\\rightarrow\\tau\\tau$"}
+  data:     {kind: data, samples: ["Muon0_*", "Muon1_*"], color: "black"}
+
+qcd:
+  method: ff
+  os: "os == 1"
+  iso: "idPNetVSjet_2 >= 7"
+  antiiso: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
+  ff_weight: "BDT_FF_score_QCD_sublead"
+
+# Same MUFFIN fake-factor setup as Configurations/mutau_PNet.yaml.  The models
+# are evaluated while WHAM builds the skim; source parquet files are unchanged.
+fake_factors:
+  models: /eos/home-w/wmatyszk/data_HiggsCP/REAL/outputs/best_models/Run3_2024Thesis_withGlobal
+  channel: mt
+  processes: [QCD]
+  era_label: 0
+  estimate:
+    enabled: true
+    output_process: jet_fakes
+    components: {QCD: true, Wjets: true, ttbar: false}
+    application_region:
+      selection: "os == 1"
+      pass: "idPNetVSjet_2 >= 7"
+      fail: "idPNetVSjet_2 >= 1 & idPNetVSjet_2 < 7"
+    fake_cut: "genPartFlav_2 == 0 | genPartFlav_2 == 6"
+
+variables:
+  # Three exhaustive b-tag multiplicity categories: 0, 1, >=2.
+  n_bjets_L:   {bins: [-0.5, 0.5, 1.5, 1000000.5], label: "$N_{b\\mathrm{-jets}}$ (L)"}
+  n_bjets_M:   {bins: [-0.5, 0.5, 1.5, 1000000.5], label: "$N_{b\\mathrm{-jets}}$ (M)"}
+  n_bjets_T:   {bins: [-0.5, 0.5, 1.5, 1000000.5], label: "$N_{b\\mathrm{-jets}}$ (T)"}
+  n_bjets_XT:  {bins: [-0.5, 0.5, 1.5, 1000000.5], label: "$N_{b\\mathrm{-jets}}$ (XT)"}
+  n_bjets_XXT: {bins: [-0.5, 0.5, 1.5, 1000000.5], label: "$N_{b\\mathrm{-jets}}$ (XXT)"}
+
+  # Nominal analysis binning and the requested alternative binning.
+  bdt_nominal: {column: BDT_pred_score, bins: [0.33, 0.7, 0.8, 0.9, 1.0],
+                label: "BDT score"}
+  bdt_alternative: {column: BDT_pred_score, bins: [0.33, 0.5, 0.7, 1.0],
+                    label: "BDT score"}
+
+  bveto_L_nominal:    {unroll: [n_bjets_L, bdt_nominal]}
+  bveto_M_nominal:    {unroll: [n_bjets_M, bdt_nominal]}
+  bveto_T_nominal:    {unroll: [n_bjets_T, bdt_nominal]}
+  bveto_XT_nominal:   {unroll: [n_bjets_XT, bdt_nominal]}
+  bveto_XXT_nominal:  {unroll: [n_bjets_XXT, bdt_nominal]}
+  bveto_L_alternative:   {unroll: [n_bjets_L, bdt_alternative]}
+  bveto_M_alternative:   {unroll: [n_bjets_M, bdt_alternative]}
+  bveto_T_alternative:   {unroll: [n_bjets_T, bdt_alternative]}
+  bveto_XT_alternative:  {unroll: [n_bjets_XT, bdt_alternative]}
+  bveto_XXT_alternative: {unroll: [n_bjets_XXT, bdt_alternative]}
+
+plots:
+  # Mandatory safety switch checked by scripts/study_bveto.py.
+  datamc_blind: true
+  datamc_metrics: []
+  datamc:
+    - bveto_L_nominal
+    - bveto_M_nominal
+    - bveto_T_nominal
+    - bveto_XT_nominal
+    - bveto_XXT_nominal
+    - bveto_L_alternative
+    - bveto_M_alternative
+    - bveto_T_alternative
+    - bveto_XT_alternative
+    - bveto_XXT_alternative
